@@ -45,6 +45,7 @@ def test_terraform_uses_read_only_scale_to_zero_runtime_and_current_fields():
     assert "memory_limit_bytes" in terraform
     assert "liveness_probe" in terraform
     assert "startup_probe" in terraform
+    assert 'interval          = "5s"' in terraform
     assert "public_endpoint" in terraform
 
     assert "registry_image" not in terraform

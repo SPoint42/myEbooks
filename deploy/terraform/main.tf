@@ -44,7 +44,7 @@ resource "scaleway_container" "this" {
       path = "/health"
     }
     failure_threshold = 20
-    interval          = "3s"
+    interval          = "5s"
     timeout           = "2s"
   }
 
