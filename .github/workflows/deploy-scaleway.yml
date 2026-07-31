@@ -1,0 +1,276 @@
+name: Deploy myEbooks to Scaleway
+
+on:
+  workflow_dispatch:
+    inputs:
+      catalog_tag:
+        description: "GitHub Release du catalogue (catalog-YYYYMMDDTHHMMSSZ)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-myebooks-prod
+  cancel-in-progress: false
+
+env:
+  TERRAFORM_DIR: deploy/terraform
+  TF_IN_AUTOMATION: "true"
+  SCW_DEFAULT_REGION: fr-par
+  SCW_DEFAULT_ZONE: fr-par-1
+
+jobs:
+  validate:
+    name: Validate catalog and source
+    runs-on: ubuntu-latest
+    outputs:
+      source_sha: ${{ steps.release.outputs.source_sha }}
+      image_tag: ${{ steps.release.outputs.image_tag }}
+
+    steps:
+      - name: Checkout deployment workflow
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Resolve and validate catalog release
+        id: release
+        env:
+          CATALOG_TAG: ${{ inputs.catalog_tag }}
+        run: |
+          if [[ ! "$CATALOG_TAG" =~ ^catalog-[0-9]{8}T[0-9]{6}Z$ ]]; then
+            echo "Invalid catalog tag: expected catalog-YYYYMMDDTHHMMSSZ." >&2
+            exit 1
+          fi
+
+          SOURCE_SHA="$(git rev-parse "${CATALOG_TAG}^{commit}")"
+          if ! git merge-base --is-ancestor "$SOURCE_SHA" origin/main; then
+            echo "The catalog tag must reference a commit from main." >&2
+            exit 1
+          fi
+
+          IMAGE_TAG="${SOURCE_SHA:0:12}-${CATALOG_TAG#catalog-}"
+          echo "source_sha=$SOURCE_SHA" >> "$GITHUB_OUTPUT"
+          echo "image_tag=$IMAGE_TAG" >> "$GITHUB_OUTPUT"
+          git checkout --detach "$SOURCE_SHA"
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Download and verify catalog
+        env:
+          CATALOG_TAG: ${{ inputs.catalog_tag }}
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/install_catalog --tag "$CATALOG_TAG"
+
+      - name: Lint
+        run: .venv/bin/python -m ruff check .
+
+      - name: Test
+        run: .venv/bin/python -m pytest
+
+      - name: Verify deployment catalog
+        run: |
+          test -s deploy/catalog/myebooks.sqlite3
+          test -s deploy/catalog/manifest.json
+          test -d deploy/catalog/covers
+
+  deploy:
+    name: Deploy to Scaleway production
+    runs-on: ubuntu-latest
+    needs: validate
+    environment: prod
+    timeout-minutes: 30
+    env:
+      TF_VAR_region: fr-par
+      TF_VAR_zone: fr-par-1
+      TF_VAR_environment: prod
+      TF_VAR_google_drive_public_url: ${{ vars.GOOGLE_DRIVE_PUBLIC_URL }}
+      SCW_TF_STATE_BUCKET: ${{ vars.SCW_TF_STATE_BUCKET }}
+
+    steps:
+      - name: Validate deployment configuration
+        env:
+          SCW_ACCESS_KEY: ${{ secrets.SCW_ACCESS_KEY }}
+          SCW_SECRET_KEY: ${{ secrets.SCW_SECRET_KEY }}
+          SCW_PROJECT_ID: ${{ secrets.SCW_PROJECT_ID }}
+          SCW_ORGANIZATION_ID: ${{ secrets.SCW_ORGANIZATION_ID }}
+        run: |
+          required=(
+            SCW_ACCESS_KEY
+            SCW_SECRET_KEY
+            SCW_PROJECT_ID
+            SCW_ORGANIZATION_ID
+            TF_VAR_google_drive_public_url
+          )
+          for name in "${required[@]}"; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "Missing GitHub environment secret or variable: $name" >&2
+              exit 1
+            fi
+          done
+          if [[ ! "$TF_VAR_google_drive_public_url" =~ ^https://drive\.google\.com/drive/folders/[A-Za-z0-9_-]{20,}([?].*)?$ ]]; then
+            echo "GOOGLE_DRIVE_PUBLIC_URL is not a supported public Drive folder URL." >&2
+            exit 1
+          fi
+
+      - name: Checkout catalog source commit
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ needs.validate.outputs.source_sha }}
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Download and verify catalog
+        env:
+          CATALOG_TAG: ${{ inputs.catalog_tag }}
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/install_catalog --tag "$CATALOG_TAG"
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_wrapper: false
+
+      - name: Check Terraform formatting
+        run: terraform -chdir="$TERRAFORM_DIR" fmt -check -recursive
+
+      - name: Initialize Terraform state
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.SCW_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.SCW_SECRET_KEY }}
+        run: |
+          STATE_BUCKET="${SCW_TF_STATE_BUCKET:-security-tools-tfstate}"
+          terraform -chdir="$TERRAFORM_DIR" init \
+            -backend-config="bucket=${STATE_BUCKET}" \
+            -backend-config="key=myebooks/prod/terraform.tfstate" \
+            -backend-config="region=fr-par" \
+            -backend-config="endpoint=https://s3.fr-par.scw.cloud" \
+            -backend-config="skip_credentials_validation=true" \
+            -backend-config="skip_region_validation=true" \
+            -backend-config="skip_requesting_account_id=true" \
+            -backend-config="force_path_style=true"
+
+      - name: Validate Terraform configuration
+        run: terraform -chdir="$TERRAFORM_DIR" validate
+
+      - name: Create private registry namespace
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.SCW_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.SCW_SECRET_KEY }}
+          SCW_ACCESS_KEY: ${{ secrets.SCW_ACCESS_KEY }}
+          SCW_SECRET_KEY: ${{ secrets.SCW_SECRET_KEY }}
+          SCW_PROJECT_ID: ${{ secrets.SCW_PROJECT_ID }}
+          SCW_DEFAULT_PROJECT_ID: ${{ secrets.SCW_PROJECT_ID }}
+          SCW_ORGANIZATION_ID: ${{ secrets.SCW_ORGANIZATION_ID }}
+          SCW_DEFAULT_ORGANIZATION_ID: ${{ secrets.SCW_ORGANIZATION_ID }}
+          TF_VAR_image: rg.fr-par.scw.cloud/bootstrap/myebooks:bootstrap
+        run: terraform -chdir="$TERRAFORM_DIR" apply -target=scaleway_registry_namespace.this -auto-approve -input=false
+
+      - name: Compute image reference
+        id: image
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.SCW_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.SCW_SECRET_KEY }}
+          IMAGE_TAG: ${{ needs.validate.outputs.image_tag }}
+        run: |
+          REGISTRY_ENDPOINT="$(terraform -chdir="$TERRAFORM_DIR" output -raw registry_endpoint)"
+          if [[ ! "$REGISTRY_ENDPOINT" =~ ^rg\.[a-z0-9-]+\.scw\.cloud/[a-z0-9][a-z0-9-]*$ ]]; then
+            echo "Terraform returned an invalid registry endpoint." >&2
+            exit 1
+          fi
+          REGISTRY_HOST="${REGISTRY_ENDPOINT%%/*}"
+          FULL_IMAGE="${REGISTRY_ENDPOINT}/myebooks:${IMAGE_TAG}"
+          echo "registry_host=$REGISTRY_HOST" >> "$GITHUB_OUTPUT"
+          echo "full=$FULL_IMAGE" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to Scaleway Container Registry
+        env:
+          REGISTRY_HOST: ${{ steps.image.outputs.registry_host }}
+          SCW_SECRET_KEY: ${{ secrets.SCW_SECRET_KEY }}
+        run: printf '%s' "$SCW_SECRET_KEY" | docker login "$REGISTRY_HOST" --username nologin --password-stdin
+
+      - name: Build deployment image
+        env:
+          FULL_IMAGE: ${{ steps.image.outputs.full }}
+        run: docker build --platform linux/amd64 --target scaleway --tag "$FULL_IMAGE" .
+
+      - name: Scan image with Trivy
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ steps.image.outputs.full }}
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          severity: HIGH,CRITICAL
+
+      - name: Push image
+        env:
+          FULL_IMAGE: ${{ steps.image.outputs.full }}
+        run: docker push "$FULL_IMAGE"
+
+      - name: Plan Scaleway deployment
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.SCW_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.SCW_SECRET_KEY }}
+          SCW_ACCESS_KEY: ${{ secrets.SCW_ACCESS_KEY }}
+          SCW_SECRET_KEY: ${{ secrets.SCW_SECRET_KEY }}
+          SCW_PROJECT_ID: ${{ secrets.SCW_PROJECT_ID }}
+          SCW_DEFAULT_PROJECT_ID: ${{ secrets.SCW_PROJECT_ID }}
+          SCW_ORGANIZATION_ID: ${{ secrets.SCW_ORGANIZATION_ID }}
+          SCW_DEFAULT_ORGANIZATION_ID: ${{ secrets.SCW_ORGANIZATION_ID }}
+          TF_VAR_image: ${{ steps.image.outputs.full }}
+        run: terraform -chdir="$TERRAFORM_DIR" plan -input=false -out=tfplan
+
+      - name: Apply Scaleway deployment
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.SCW_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.SCW_SECRET_KEY }}
+          SCW_ACCESS_KEY: ${{ secrets.SCW_ACCESS_KEY }}
+          SCW_SECRET_KEY: ${{ secrets.SCW_SECRET_KEY }}
+          SCW_PROJECT_ID: ${{ secrets.SCW_PROJECT_ID }}
+          SCW_DEFAULT_PROJECT_ID: ${{ secrets.SCW_PROJECT_ID }}
+          SCW_ORGANIZATION_ID: ${{ secrets.SCW_ORGANIZATION_ID }}
+          SCW_DEFAULT_ORGANIZATION_ID: ${{ secrets.SCW_ORGANIZATION_ID }}
+          TF_VAR_image: ${{ steps.image.outputs.full }}
+        run: terraform -chdir="$TERRAFORM_DIR" apply -input=false tfplan
+
+      - name: Verify public endpoint
+        id: endpoint
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.SCW_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.SCW_SECRET_KEY }}
+        run: |
+          CONTAINER_URL="$(terraform -chdir="$TERRAFORM_DIR" output -raw container_url)"
+          if [[ ! "$CONTAINER_URL" =~ ^https:// ]]; then
+            echo "Terraform returned an invalid public endpoint." >&2
+            exit 1
+          fi
+          curl --fail --show-error --silent \
+            --retry 12 --retry-delay 10 --retry-all-errors \
+            --max-time 30 "${CONTAINER_URL%/}/health"
+          echo "url=${CONTAINER_URL%/}" >> "$GITHUB_OUTPUT"
+
+      - name: Deployment summary
+        env:
+          CATALOG_TAG: ${{ inputs.catalog_tag }}
+          CONTAINER_URL: ${{ steps.endpoint.outputs.url }}
+          FULL_IMAGE: ${{ steps.image.outputs.full }}
+        run: |
+          {
+            echo "## myEbooks deployed to Scaleway"
+            echo
+            echo "- Catalog: \`$CATALOG_TAG\`"
+            echo "- Image: \`$FULL_IMAGE\`"
+            echo "- Scale: \`0..1\`"
+            echo "- URL: $CONTAINER_URL"
+          } >> "$GITHUB_STEP_SUMMARY"

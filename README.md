@@ -153,6 +153,66 @@ Pour tester l’image `runtime` avec le cache local monté en lecture seule :
 docker compose up --build
 ```
 
+## Déployer sur Scaleway avec GitHub Actions
+
+Le workflow `Deploy myEbooks to Scaleway` réalise un déploiement manuel et reproductible. Il
+associe toujours l’image au commit exact de la Release du catalogue, vérifie le catalogue, lance
+les tests, construit le stage Docker `scaleway`, analyse l’image avec Trivy, la publie dans un
+registre privé puis applique `deploy/terraform/`.
+
+Le Serverless Container utilise 256 Mio, `min_scale = 0` et `max_scale = 1`. Il n’indexe rien :
+SQLite et les vignettes sont incorporées à l’image et ouvertes en lecture seule. Son endpoint
+HTTPS reste public afin que le navigateur Kobo puisse le consulter sans jeton Scaleway.
+
+### Configuration GitHub à effectuer une seule fois
+
+Dans **Settings → Environments**, créer l’environnement `prod`, l’autoriser uniquement depuis
+`main`, puis ajouter les secrets suivants :
+
+| Secret d’environnement | Valeur |
+| --- | --- |
+| `SCW_ACCESS_KEY` | Access key de l’application IAM Scaleway dédiée |
+| `SCW_SECRET_KEY` | Secret key correspondant |
+| `SCW_PROJECT_ID` | Identifiant du projet Scaleway cible |
+| `SCW_ORGANIZATION_ID` | Identifiant de l’organisation Scaleway |
+
+Ajouter ensuite ces variables dans le même environnement :
+
+| Variable d’environnement | Valeur |
+| --- | --- |
+| `GOOGLE_DRIVE_PUBLIC_URL` | URL HTTPS du dossier Drive public |
+| `SCW_TF_STATE_BUCKET` | Facultatif, défaut : `security-tools-tfstate` |
+
+L’application IAM Scaleway utilisée par GitHub doit être limitée au projet cible et posséder
+`ContainerRegistryFullAccess`, `ContainersFullAccess` et `ObjectStorageFullAccess`. La dernière
+permission permet d’utiliser le bucket S3 comme backend Terraform. Le workflow stocke son état
+avec la clé distincte `myebooks/prod/terraform.tfstate`.
+
+### Premier déploiement
+
+Les fichiers de déploiement doivent d’abord être commités et poussés sur `main`. Depuis ce
+checkout propre, publier ensuite le catalogue :
+
+```bash
+./scripts/publish_catalog \
+  --drive-url 'https://drive.google.com/drive/folders/1WeqHFZQ0zl0Oy5u6JiabChlIGx3D5sie?usp=sharing'
+```
+
+Noter le tag affiché, puis aller dans **Actions → Deploy myEbooks to Scaleway → Run workflow** et
+saisir ce tag. La même opération peut être déclenchée depuis le Mac :
+
+```bash
+./scripts/deploy_scaleway --tag catalog-YYYYMMDDTHHMMSSZ --watch
+```
+
+Le workflow demande l’accès à l’environnement `prod` uniquement après avoir validé le tag,
+testé le commit associé et vérifié l’archive. Son résumé fournit l’URL Scaleway finale. Tester
+également `URL/health`, puis ouvrir cette URL dans le navigateur de la Kobo.
+
+Pour publier une mise à jour, relancer `publish_catalog`, puis déployer le nouveau tag. Les
+anciens tags d’image peuvent être supprimés périodiquement du Container Registry afin de limiter
+le stockage facturé.
+
 ## Télécharger directement sur une Kobo
 
 1. Ouvrez le navigateur expérimental de la Kobo.
@@ -165,7 +225,8 @@ MIME. Le fichier doit être dépourvu d’Adobe DRM. Selon le modèle de Kobo, u
 resynchronisation de la bibliothèque peut être nécessaire.
 
 Ne rendez pas l’application publique sans contrôle d’accès : toute personne disposant de son
-URL pourrait télécharger les livres indexés.
+URL peut consulter la bibliothèque et télécharger les livres indexés. Le mode public est requis
+par le déploiement actuel pour ne pas demander de jeton IAM dans le navigateur Kobo.
 
 ## Variante avec l’API Google Drive
 
@@ -215,7 +276,8 @@ pytest
 
 Les tests couvrent notamment l’extraction EPUB, les connecteurs Drive, l’indexation de démarrage
 en arrière-plan, la création et la vérification de l’artefact, le runtime SQLite en lecture seule,
-le classement des derniers livres indexés, la pagination et les téléchargements Kobo.
+le classement des derniers livres indexés, la pagination, les téléchargements Kobo et la
+structure sécurisée du déploiement GitHub Actions/Terraform.
 
 ## Limites connues
 

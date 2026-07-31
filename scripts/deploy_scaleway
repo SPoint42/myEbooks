@@ -1,0 +1,92 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+REPOSITORY="${MYEBOOKS_GITHUB_REPOSITORY:-SPoint42/myEbooks}"
+WORKFLOW="deploy-scaleway.yml"
+CATALOG_TAG=""
+WATCH=0
+
+usage() {
+    cat <<'EOF'
+Usage: ./scripts/deploy_scaleway --tag catalog-YYYYMMDDTHHMMSSZ [--watch]
+
+Declenche le workflow GitHub Actions qui deploie myEbooks sur Scaleway.
+Ce script ne construit pas l'image et ne contacte pas Scaleway directement.
+
+Options:
+  --tag TAG     Release GitHub du catalogue a deployer (obligatoire)
+  --watch       Attend et affiche l'execution du workflow
+  -h, --help    Affiche cette aide
+
+Variable facultative : MYEBOOKS_GITHUB_REPOSITORY (defaut : SPoint42/myEbooks).
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --tag)
+            if [[ $# -lt 2 || -z "${2:-}" || "$2" == -* ]]; then
+                echo "Erreur : une valeur est requise apres --tag." >&2
+                exit 2
+            fi
+            CATALOG_TAG="$2"
+            shift 2
+            ;;
+        --watch)
+            WATCH=1
+            shift
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            echo "Erreur : option inconnue : $1" >&2
+            usage >&2
+            exit 2
+            ;;
+    esac
+done
+
+if [[ ! "$CATALOG_TAG" =~ ^catalog-[0-9]{8}T[0-9]{6}Z$ ]]; then
+    echo "Erreur : --tag doit respecter catalog-YYYYMMDDTHHMMSSZ." >&2
+    exit 2
+fi
+
+if ! command -v gh >/dev/null 2>&1; then
+    echo "Erreur : la commande gh est requise." >&2
+    exit 1
+fi
+if ! gh auth status >/dev/null 2>&1; then
+    echo "Erreur : authentifiez gh avec 'gh auth login'." >&2
+    exit 1
+fi
+if ! gh release view "$CATALOG_TAG" --repo "$REPOSITORY" >/dev/null 2>&1; then
+    echo "Erreur : la Release $CATALOG_TAG est introuvable dans $REPOSITORY." >&2
+    exit 1
+fi
+
+gh workflow run "$WORKFLOW" \
+    --repo "$REPOSITORY" \
+    --ref main \
+    --field "catalog_tag=$CATALOG_TAG"
+
+echo "Deploiement demande pour $CATALOG_TAG."
+echo "Suivi : https://github.com/${REPOSITORY}/actions/workflows/${WORKFLOW}"
+
+if [[ "$WATCH" == "1" ]]; then
+    sleep 4
+    RUN_ID="$(gh run list \
+        --repo "$REPOSITORY" \
+        --workflow "$WORKFLOW" \
+        --event workflow_dispatch \
+        --limit 1 \
+        --json databaseId \
+        --jq '.[0].databaseId')"
+    if [[ ! "$RUN_ID" =~ ^[0-9]+$ ]]; then
+        echo "Erreur : impossible d'identifier l'execution GitHub Actions." >&2
+        exit 1
+    fi
+    gh run watch "$RUN_ID" --repo "$REPOSITORY" --exit-status
+fi

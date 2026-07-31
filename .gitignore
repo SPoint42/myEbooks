@@ -14,5 +14,10 @@ data/
 dist/
 deploy/catalog/*
 !deploy/catalog/.gitkeep
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+crash.log
 credentials*.json
 service-account*.json

@@ -13,6 +13,9 @@ Les scripts opérationnels de `myEbooks` sont regroupés dans ce répertoire.
   et installe son contenu dans `deploy/catalog/` avant un build Docker.
 - `build_scaleway_image` construit localement l’image `linux/amd64` attendue par Scaleway, sans
   la publier dans un registre.
+- `deploy_scaleway --tag catalog-YYYYMMDDTHHMMSSZ` déclenche explicitement le workflow GitHub
+  Actions de déploiement. L’option `--watch` attend son résultat. Ce script nécessite que les
+  secrets et variables de l’environnement GitHub `prod` soient déjà configurés.
 
 Le fichier `../start_dev` est uniquement un point d’entrée court permettant d’exécuter
 `./start_dev` depuis la racine du dépôt.
