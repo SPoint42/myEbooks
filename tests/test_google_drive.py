@@ -11,10 +11,12 @@ def bare_source(folder_id=None):
     return source
 
 
-def test_ebook_detection_accepts_mime_type_or_extension():
-    assert GoogleDriveSource._is_ebook({"name": "book.bin", "mimeType": "application/pdf"})
+def test_ebook_detection_accepts_only_epub_extension():
     assert GoogleDriveSource._is_ebook(
         {"name": "book.EPUB", "mimeType": "application/octet-stream"}
+    )
+    assert not GoogleDriveSource._is_ebook(
+        {"name": "book.pdf", "mimeType": "application/pdf"}
     )
     assert not GoogleDriveSource._is_ebook({"name": "notes.txt", "mimeType": "text/plain"})
 
@@ -47,7 +49,7 @@ def test_folder_listing_is_recursive(monkeypatch):
 
     files = source.list_files()
 
-    assert {item.id for item in files} == {"pdf-1", "epub-1"}
+    assert {item.id for item in files} == {"epub-1"}
     assert next(item for item in files if item.id == "epub-1").fingerprint == "abc"
 
 
@@ -67,4 +69,4 @@ def test_drive_listing_filters_non_ebooks(monkeypatch):
         ],
     )
 
-    assert [item.id for item in source.list_files()] == ["pdf-1"]
+    assert source.list_files() == []

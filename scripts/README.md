@@ -2,8 +2,8 @@
 
 Les scripts opérationnels de `myEbooks` sont regroupés dans ce répertoire.
 
-- `start_dev` prépare l’environnement Python, met à jour le catalogue local puis lance le
-  serveur Web en lecture seule. Son option `--kobo` ouvre l’écoute sur le réseau local.
+- `start_dev` prépare l’environnement Python, lance immédiatement le serveur Web puis met à
+  jour SQLite en arrière-plan. Son option `--kobo` ouvre l’écoute sur le réseau local.
 - `index_catalog` met uniquement à jour `data/myebooks.sqlite3` et les vignettes locales.
 - `build_catalog` indexe puis génère une archive vérifiable dans `dist/` et prépare
   `deploy/catalog/` pour construire l’image Scaleway.

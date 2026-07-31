@@ -13,6 +13,26 @@ def test_settings_defaults_to_fake_source(monkeypatch, tmp_path):
 
     assert settings.source == "fake"
     assert settings.database_path == tmp_path / "myebooks.sqlite3"
+    assert settings.background_index is False
+
+
+def test_background_index_settings_are_parsed(monkeypatch, tmp_path):
+    monkeypatch.setenv("EBOOK_SOURCE", "fake")
+    monkeypatch.setenv("EBOOK_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("EBOOK_BACKGROUND_INDEX", "true")
+    monkeypatch.setenv("EBOOK_FORCE_INDEX_ON_START", "1")
+
+    settings = Settings.from_env()
+
+    assert settings.background_index is True
+    assert settings.force_index_on_start is True
+
+
+def test_invalid_background_index_setting_is_rejected(monkeypatch):
+    monkeypatch.setenv("EBOOK_BACKGROUND_INDEX", "sometimes")
+
+    with pytest.raises(ValueError, match="EBOOK_BACKGROUND_INDEX"):
+        Settings.from_env()
 
 
 def test_google_source_requires_credentials(monkeypatch, tmp_path):

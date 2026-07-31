@@ -67,7 +67,7 @@ Options:
   --host ADRESSE       Adresse d'écoute (défaut : 127.0.0.1)
   --kobo               Rend le serveur accessible sur le réseau local
   --port PORT          Port HTTP (défaut : 8000)
-  --library DOSSIER    Dossier contenant les EPUB/PDF
+  --library DOSSIER    Dossier contenant les EPUB
   --drive-url URL      URL HTTPS d'un dossier Google Drive public
   --data DOSSIER       Dossier de la base SQLite et des couvertures
   --force-index        Réanalyse tous les ebooks avant le démarrage
@@ -212,6 +212,8 @@ if [[ "${MYEBOOKS_SKIP_INSTALL:-0}" != "1" ]]; then
 fi
 
 export EBOOK_DATA_DIR="$DATA_DIR"
+export EBOOK_BACKGROUND_INDEX=1
+export EBOOK_FORCE_INDEX_ON_START="$FORCE_INDEX"
 if [[ "$SOURCE_MODE" == "google_public" ]]; then
     export EBOOK_SOURCE=google_public
     export GOOGLE_DRIVE_PUBLIC_URL="$DRIVE_URL"
@@ -222,22 +224,8 @@ else
     unset GOOGLE_DRIVE_PUBLIC_URL
 fi
 
-index_command=(
-    "$PYTHON" -m myebooks.catalog_cli index
-    --data "$DATA_DIR"
-)
-if [[ "$SOURCE_MODE" == "google_public" ]]; then
-    index_command+=(--drive-url "$DRIVE_URL")
-else
-    index_command+=(--library "$LIBRARY_DIR")
-fi
-if [[ "$FORCE_INDEX" == "1" ]]; then
-    index_command+=(--force)
-fi
-
 echo
-echo "Mise à jour locale du catalogue avant le démarrage…"
-"${index_command[@]}"
+echo "L'indexation locale démarrera en arrière-plan avec le serveur."
 
 command=(
     "$PYTHON" -m uvicorn myebooks.main:app

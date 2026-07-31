@@ -11,7 +11,6 @@ from ..domain import RemoteFile
 LOCAL_FILE_ID = re.compile(r"^[0-9a-f]{64}$")
 MIME_BY_EXTENSION = {
     ".epub": "application/epub+zip",
-    ".pdf": "application/pdf",
 }
 
 

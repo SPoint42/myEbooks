@@ -24,7 +24,7 @@ PROJECT_DIR = Path(__file__).resolve().parents[2]
 def _add_source_arguments(parser: argparse.ArgumentParser) -> None:
     sources = parser.add_mutually_exclusive_group()
     sources.add_argument("--drive-url", help="URL HTTPS du dossier Google Drive public")
-    sources.add_argument("--library", type=Path, help="Dossier local de PDF/EPUB")
+    sources.add_argument("--library", type=Path, help="Dossier local de fichiers EPUB")
     sources.add_argument("--fake", action="store_true", help="Utilise les deux ebooks de démo")
     parser.add_argument(
         "--data",

@@ -31,7 +31,7 @@ def test_start_dev_is_executable_and_documents_options():
     assert "--kobo" in result.stdout
     assert "--force-index" in result.stdout
     assert "/kobo" in START_DEV_IMPLEMENTATION.read_text()
-    assert "myebooks.catalog_cli index" in START_DEV_IMPLEMENTATION.read_text()
+    assert "EBOOK_BACKGROUND_INDEX=1" in START_DEV_IMPLEMENTATION.read_text()
     assert "pandaIndexKobo" not in START_DEV_IMPLEMENTATION.read_text()
     assert "./start_dev --kobo" in result.stdout
 

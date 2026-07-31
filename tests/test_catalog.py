@@ -28,22 +28,22 @@ def test_catalog_artifact_contains_read_only_database_and_referenced_covers(sett
     )
 
     assert artifact.version == "20260731T123000Z"
-    assert artifact.book_count == 2
-    assert artifact.cover_count == 2
+    assert artifact.book_count == 1
+    assert artifact.cover_count == 1
     assert artifact.archive_path.is_file()
     assert artifact.checksum_path.is_file()
     assert (artifact.staged_catalog / "myebooks.sqlite3").is_file()
-    assert len(list((artifact.staged_catalog / "covers").iterdir())) == 2
+    assert len(list((artifact.staged_catalog / "covers").iterdir())) == 1
 
     with tarfile.open(artifact.archive_path, "r:gz") as archive:
         names = set(archive.getnames())
     assert "myebooks.sqlite3" in names
     assert "manifest.json" in names
-    assert len([name for name in names if name.startswith("covers/")]) == 2
+    assert len([name for name in names if name.startswith("covers/")]) == 1
     assert not any(name.endswith((".epub", ".pdf")) for name in names)
 
     manifest = json.loads((artifact.staged_catalog / "manifest.json").read_text())
-    assert manifest["book_count"] == 2
+    assert manifest["book_count"] == 1
     assert manifest["source"] == "Drive de démonstration"
     deployed_database = LibraryDatabase(
         artifact.staged_catalog / "myebooks.sqlite3", read_only=True
@@ -68,9 +68,9 @@ def test_catalog_archive_can_be_verified_and_installed(settings, tmp_path):
         staged_catalog=installed,
     )
 
-    assert len(LibraryDatabase(installed / "myebooks.sqlite3", read_only=True).list_books()) == 2
+    assert len(LibraryDatabase(installed / "myebooks.sqlite3", read_only=True).list_books()) == 1
     assert (installed / "manifest.json").is_file()
-    assert len(list((installed / "covers").iterdir())) == 2
+    assert len(list((installed / "covers").iterdir())) == 1
 
 
 def test_catalog_install_rejects_path_traversal(tmp_path):

@@ -3,7 +3,9 @@ from __future__ import annotations
 import logging
 import re
 import secrets
+import threading
 import unicodedata
+from contextlib import asynccontextmanager
 from dataclasses import asdict
 from pathlib import Path
 from urllib.parse import quote, urlencode
@@ -22,6 +24,7 @@ from fastapi.templating import Jinja2Templates
 from .config import Settings
 from .database import LibraryDatabase
 from .domain import EbookSource, RemoteFile
+from .indexer import IndexAlreadyRunning, LibraryIndexer
 from .sources import create_source, source_label
 
 LOGGER = logging.getLogger(__name__)
@@ -81,18 +84,47 @@ def create_app(
     source: EbookSource | None = None,
 ) -> FastAPI:
     settings = settings or Settings.from_env()
-    database = LibraryDatabase(settings.database_path, read_only=True)
-    database.validate_catalog()
-    if not settings.covers_dir.is_dir():
-        raise FileNotFoundError(
-            f"Répertoire de vignettes introuvable : {settings.covers_dir}. "
-            "Installez un catalogue complet avant de démarrer l'application."
-        )
+    if settings.background_index:
+        settings.data_dir.mkdir(parents=True, exist_ok=True)
+        settings.covers_dir.mkdir(parents=True, exist_ok=True)
+        database = LibraryDatabase(settings.database_path)
+        database.initialize()
+    else:
+        database = LibraryDatabase(settings.database_path, read_only=True)
+        database.validate_catalog()
+        if not settings.covers_dir.is_dir():
+            raise FileNotFoundError(
+                f"Répertoire de vignettes introuvable : {settings.covers_dir}. "
+                "Installez un catalogue complet avant de démarrer l'application."
+            )
     if source is None:
         source = create_source(settings)
     templates = Jinja2Templates(directory=PACKAGE_DIR / "templates")
+    indexer = LibraryIndexer(settings, database, source) if settings.background_index else None
 
-    app = FastAPI(title="myEbooks", version="0.4.0")
+    def run_background_index() -> None:
+        if indexer is None:
+            return
+        try:
+            indexer.run(force=settings.force_index_on_start)
+        except IndexAlreadyRunning:
+            LOGGER.info("Indexation de démarrage déjà en cours")
+        except Exception:
+            LOGGER.exception("L'indexation de démarrage a échoué")
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        if indexer is not None:
+            index_thread = threading.Thread(
+                target=run_background_index,
+                name="myebooks-background-index",
+                daemon=True,
+            )
+            app.state.index_thread = index_thread
+            index_thread.start()
+        yield
+
+    app = FastAPI(title="myEbooks", version="0.4.0", lifespan=lifespan)
     app.state.settings = settings
     app.state.database = database
     app.mount("/static", StaticFiles(directory=PACKAGE_DIR / "static"), name="static")

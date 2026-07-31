@@ -11,7 +11,6 @@ from ..domain import RemoteFile
 
 DRIVE_READONLY_SCOPE = "https://www.googleapis.com/auth/drive.readonly"
 FOLDER_MIME_TYPE = "application/vnd.google-apps.folder"
-EBOOK_MIME_TYPES = {"application/pdf", "application/epub+zip"}
 
 
 class GoogleDriveSource:
@@ -29,7 +28,7 @@ class GoogleDriveSource:
     @staticmethod
     def _is_ebook(item: dict[str, object]) -> bool:
         name = str(item.get("name", "")).lower()
-        return str(item.get("mimeType", "")) in EBOOK_MIME_TYPES or name.endswith((".pdf", ".epub"))
+        return name.endswith(".epub")
 
     @staticmethod
     def _remote_file(item: dict[str, object]) -> RemoteFile:

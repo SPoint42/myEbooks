@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import re
+import threading
 from contextlib import closing
+from dataclasses import replace
 
 from fastapi.testclient import TestClient
 
@@ -60,9 +62,9 @@ def test_library_uses_catalog_built_outside_the_web_process(settings):
 
     assert first_page.status_code == 200
     assert "Clean Code" in first_page.text
-    assert "The Pragmatic Programmer" in first_page.text
+    assert "The Pragmatic Programmer" not in first_page.text
     assert "<script" not in first_page.text
-    assert len(books) == 2
+    assert len(books) == 1
     assert all(book["cover_url"] for book in books)
 
 
@@ -102,6 +104,39 @@ def test_missing_catalog_prevents_startup(settings):
         raise AssertionError("Une application sans catalogue ne doit pas démarrer")
 
 
+def test_local_startup_indexes_in_background_without_blocking_the_site(settings):
+    delegate = FakeDriveSource()
+
+    class DelayedSource:
+        def __init__(self):
+            self.started = threading.Event()
+            self.release = threading.Event()
+
+        def list_files(self):
+            self.started.set()
+            assert self.release.wait(timeout=5)
+            return delegate.list_files()
+
+        def download(self, remote_file):
+            return delegate.download(remote_file)
+
+    source = DelayedSource()
+    app = create_app(replace(settings, background_index=True), source)
+
+    with TestClient(app) as client:
+        assert source.started.wait(timeout=1)
+        while_indexing = client.get("/")
+        assert while_indexing.status_code == 200
+        assert "Votre bibliothèque attend" in while_indexing.text
+        source.release.set()
+        app.state.index_thread.join(timeout=5)
+        assert not app.state.index_thread.is_alive()
+        indexed = client.get("/")
+
+    assert "Clean Code" in indexed.text
+    assert "The Pragmatic Programmer" not in indexed.text
+
+
 def test_indexed_epub_can_be_downloaded_for_kobo(settings):
     source = index_fake_catalog(settings)
     app = create_app(settings, source)
@@ -133,13 +168,43 @@ def test_search_works_without_javascript(settings):
     app = create_app(settings, source)
 
     with TestClient(app) as client:
-        response = client.get("/?q=Pragmatic")
+        response = client.get("/?q=Clean")
 
     assert response.status_code == 200
-    assert "The Pragmatic Programmer" in response.text
-    assert "Clean Code" not in response.text
+    assert "Clean Code" in response.text
+    assert "The Pragmatic Programmer" not in response.text
     assert "Télécharger sur Kobo" in response.text
     assert "<script" not in response.text
+
+
+def test_legacy_pdf_rows_are_hidden_and_cannot_be_downloaded(settings):
+    database = initialize_catalog(settings)
+    with closing(database.connect()) as connection, connection:
+        connection.execute(
+            """
+            INSERT INTO books (
+                source_id, source_name, source_fingerprint, file_format, title,
+                available, indexed_at
+            ) VALUES (?, ?, ?, 'pdf', ?, 1, ?)
+            """,
+            (
+                "legacy-pdf",
+                "legacy.pdf",
+                "legacy",
+                "Ancien PDF",
+                "2026-07-31T12:00:00+00:00",
+            ),
+        )
+    app = create_app(settings, FakeDriveSource())
+
+    with TestClient(app) as client:
+        page = client.get("/")
+        books = client.get("/api/books").json()
+        download = client.get("/books/1/download")
+
+    assert "Ancien PDF" not in page.text
+    assert books == []
+    assert download.status_code == 404
 
 
 def test_home_displays_most_recently_indexed_books_first(settings):

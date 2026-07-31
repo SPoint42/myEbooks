@@ -7,11 +7,18 @@ from pathlib import Path
 
 from .config import Settings
 from .database import LibraryDatabase
-from .domain import EbookSource, ExtractedBook, IndexResult
+from .domain import EbookSource, ExtractedBook, IndexResult, RemoteFile
 from .extractors import extract_book
 
 LOGGER = logging.getLogger("uvicorn.error.myebooks.indexer")
 ALLOWED_COVER_EXTENSIONS = {"jpg", "png", "gif", "webp"}
+
+
+def _is_epub(remote_file: RemoteFile) -> bool:
+    return (
+        remote_file.name.lower().endswith(".epub")
+        and remote_file.mime_type == "application/epub+zip"
+    )
 
 
 class IndexAlreadyRunning(RuntimeError):
@@ -52,7 +59,11 @@ class LibraryIndexer:
         sync_id = self.database.start_sync()
         try:
             LOGGER.info("Indexation démarrée : recensement des livres de la source…")
-            remote_files = self.source.list_files()
+            remote_files = [
+                remote_file
+                for remote_file in self.source.list_files()
+                if _is_epub(remote_file)
+            ]
             present_ids = {remote_file.id for remote_file in remote_files}
             indexed = unchanged = failed = 0
             total = len(remote_files)

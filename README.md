@@ -1,9 +1,10 @@
 # myEbooks
 
-`myEbooks` est une petite bibliothèque Web pour les fichiers PDF et EPUB stockés dans un
-dossier Google Drive partagé par lien. Un script exécuté sur le Mac extrait le titre, l’auteur,
-l’année, l’ISBN et la couverture. L’application Web ouvre ensuite ce catalogue SQLite en lecture
-seule : aucune indexation ne peut être déclenchée depuis le serveur.
+`myEbooks` est une petite bibliothèque Web pour les fichiers EPUB stockés dans un
+dossier Google Drive partagé par lien. Sur le Mac, l’application démarre immédiatement puis
+extrait le titre, l’auteur, l’année, l’ISBN et la couverture en arrière-plan dans SQLite. L’image
+Scaleway consomme ensuite un catalogue préconstruit en lecture seule. Aucun endpoint HTTP ne
+permet de déclencher une indexation.
 
 ![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB)
 ![License](https://img.shields.io/badge/license-MIT-156B52)
@@ -12,10 +13,10 @@ seule : aucune indexation ne peut être déclenchée depuis le serveur.
 
 - galerie Web responsive, recherche, filtre par auteur et pagination de 10 livres par page ;
 - page d’accueil classée du livre le plus récemment indexé au plus ancien ;
-- extraction des métadonnées, de l’ISBN et de la couverture des EPUB et PDF ;
+- extraction des métadonnées, de l’ISBN et de la couverture des EPUB ;
 - indexation locale incrémentale par checksum ou date de modification ;
 - accès Google Drive strictement en lecture seule, par lien public ou compte de service ;
-- téléchargement direct du PDF ou de l’EPUB depuis une Kobo ;
+- téléchargement direct de l’EPUB depuis une Kobo ;
 - interface HTML/CSS utilisable sans JavaScript ;
 - catalogue SQLite et vignettes publiables comme artefact GitHub vérifié par SHA-256 ;
 - runtime SQLite strictement en lecture seule et image Docker non-root pour Scaleway ;
@@ -30,9 +31,10 @@ cd /Users/s.gioria/perso/github.com/SPoint42/myEbooks
 ./start_dev
 ```
 
-Le lanceur crée `.venv` si nécessaire, indexe localement
-`/Users/s.gioria/goinfre/cambook`, puis démarre l’application en lecture seule sur
-<http://127.0.0.1:8000>. Les lancements suivants sont incrémentaux.
+Le lanceur crée `.venv` si nécessaire et démarre l’application sur
+<http://127.0.0.1:8000>. L’indexation de `/Users/s.gioria/goinfre/cambook` commence dans un
+thread en arrière-plan : le site reste accessible avec le catalogue existant pendant la mise à
+jour. Les lancements suivants sont incrémentaux.
 
 Pour tout réanalyser :
 
@@ -66,12 +68,13 @@ et le rôle **Lecteur**. Le propriétaire ne doit pas avoir désactivé le tél�
   --drive-url 'https://drive.google.com/drive/folders/1WeqHFZQ0zl0Oy5u6JiabChlIGx3D5sie?usp=sharing'
 ```
 
-L’indexation se termine avant le démarrage du serveur et sa progression apparaît dans le
-terminal. Aucun endpoint ou bouton d’indexation n’existe dans `/`, `/kobo` ou ailleurs dans
-l’application Web.
+Le serveur répond immédiatement et la progression de l’indexation apparaît dans le terminal.
+Les nouvelles entrées SQLite deviennent visibles au fil de leur traitement. Aucun endpoint ou
+bouton d’indexation n’existe dans `/`, `/kobo` ou ailleurs dans l’application Web.
 
 Le listing public ne fournit ni date de modification ni checksum. Utilisez `--force-index`
 lorsqu’un fichier a été remplacé sur Drive en conservant le même identifiant.
+Les fichiers PDF présents dans le Drive ou le dossier local sont systématiquement ignorés.
 
 ## Construire le catalogue de déploiement
 
@@ -89,9 +92,9 @@ Le script produit :
 - le fichier `.sha256` associé ;
 - `deploy/catalog/`, contenu incorporé à l’image Scaleway.
 
-L’archive contient uniquement SQLite, un manifeste et les vignettes référencées. Aucun EPUB ou
-PDF n’est copié dans l’artefact. La base exportée est une copie SQLite cohérente, sans journal
-WAL, contrôlée avant sa mise en archive.
+L’archive contient uniquement SQLite, un manifeste et les vignettes référencées. Aucun fichier
+EPUB source n’est copié dans l’artefact. La base exportée est une copie SQLite cohérente, sans
+journal WAL, contrôlée avant sa mise en archive.
 
 Pour mettre uniquement à jour le cache local :
 
@@ -157,9 +160,9 @@ docker compose up --build
 3. Recherchez un livre avec le formulaire HTML.
 4. Touchez **Télécharger sur Kobo**.
 
-L’application récupère le fichier depuis Drive puis le sert avec son nom d’origine et le bon
-type MIME. Les EPUB et PDF doivent être dépourvus d’Adobe DRM. Selon le modèle de Kobo, un
-redémarrage ou une resynchronisation de la bibliothèque peut être nécessaire.
+L’application récupère l’EPUB depuis Drive puis le sert avec son nom d’origine et le bon type
+MIME. Le fichier doit être dépourvu d’Adobe DRM. Selon le modèle de Kobo, un redémarrage ou une
+resynchronisation de la bibliothèque peut être nécessaire.
 
 Ne rendez pas l’application publique sans contrôle d’accès : toute personne disposant de son
 URL pourrait télécharger les livres indexés.
@@ -187,7 +190,7 @@ documentées dans [`.env.example`](.env.example).
 Google Drive / dossier local
           │ script exécuté sur le Mac
           ▼
-    Extracteur PDF ou EPUB ──────► vignettes
+         Extracteur EPUB ────────► vignettes
           │
           └──────────────────────► SQLite
                                       │
@@ -210,14 +213,13 @@ ruff check .
 pytest
 ```
 
-Les tests couvrent notamment l’extraction PDF/EPUB, les connecteurs Drive, le cache incrémental,
-la création et la vérification de l’artefact, le runtime SQLite en lecture seule, le classement
-des derniers livres indexés, la pagination et les téléchargements Kobo.
+Les tests couvrent notamment l’extraction EPUB, les connecteurs Drive, l’indexation de démarrage
+en arrière-plan, la création et la vérification de l’artefact, le runtime SQLite en lecture seule,
+le classement des derniers livres indexés, la pagination et les téléchargements Kobo.
 
 ## Limites connues
 
-- aucun OCR pour les ISBN présents uniquement dans l’image d’un PDF scanné ;
-- les PDF protégés par mot de passe ne sont pas pris en charge ;
+- les fichiers PDF sont volontairement ignorés ;
 - aucune authentification utilisateur intégrée ;
 - une nouvelle indexation n’est visible en production qu’après publication du catalogue et
   construction d’une nouvelle image.

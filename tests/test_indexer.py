@@ -23,12 +23,12 @@ def test_index_is_incremental_and_stores_books(settings):
     second = indexer.run()
     books = database.list_books()
 
-    assert first.discovered == 2
-    assert first.indexed == 2
+    assert first.discovered == 1
+    assert first.indexed == 1
     assert first.failed == 0
     assert second.indexed == 0
-    assert second.unchanged == 2
-    assert [book.title for book in books] == ["The Pragmatic Programmer", "Clean Code"]
+    assert second.unchanged == 1
+    assert [book.title for book in books] == ["Clean Code"]
     assert all(book.cover_filename for book in books)
     assert all((settings.covers_dir / book.cover_filename).is_file() for book in books)
 
@@ -36,12 +36,12 @@ def test_index_is_incremental_and_stores_books(settings):
 def test_index_marks_books_removed_from_drive(settings):
     indexer, database, source = make_indexer(settings)
     indexer.run()
-    source._files.pop("demo-pdf")
+    source._files.pop("demo-epub")
 
     result = indexer.run()
 
     assert result.removed == 1
-    assert [book.title for book in database.list_books()] == ["Clean Code"]
+    assert database.list_books() == []
 
 
 def test_force_reindexes_unchanged_files(settings):
@@ -50,7 +50,7 @@ def test_force_reindexes_unchanged_files(settings):
 
     result = indexer.run(force=True)
 
-    assert result.indexed == 2
+    assert result.indexed == 1
     assert result.unchanged == 0
 
 
@@ -61,5 +61,5 @@ def test_index_reports_progress_in_logs(settings, caplog):
     indexer.run()
 
     assert "recensement des livres" in caplog.text
-    assert "0 livre(s) traité(s) sur 2" in caplog.text
-    assert "2 livre(s) traité(s) sur 2" in caplog.text
+    assert "0 livre(s) traité(s) sur 1" in caplog.text
+    assert "1 livre(s) traité(s) sur 1" in caplog.text

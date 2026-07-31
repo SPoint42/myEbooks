@@ -17,7 +17,6 @@ DIRECT_DOWNLOAD_URL = "https://drive.usercontent.google.com/download"
 LOGGER = logging.getLogger("uvicorn.error.myebooks.google_drive")
 MIME_BY_EXTENSION = {
     ".epub": "application/epub+zip",
-    ".pdf": "application/pdf",
 }
 
 
@@ -57,10 +56,8 @@ class PublicGoogleDriveSource:
     def _validate_content(self, remote_file: RemoteFile, content: bytes) -> bytes:
         if len(content) > self.max_file_size:
             raise ValueError("Fichier trop volumineux")
-        if remote_file.mime_type == "application/epub+zip" and not content.startswith(b"PK"):
+        if not content.startswith(b"PK"):
             raise ValueError("Le contenu téléchargé n'est pas un EPUB valide")
-        if remote_file.mime_type == "application/pdf" and not content.startswith(b"%PDF"):
-            raise ValueError("Le contenu téléchargé n'est pas un PDF valide")
         return content
 
     def _download_with_gdown(self, remote_file: RemoteFile) -> bytes:
@@ -106,6 +103,11 @@ class PublicGoogleDriveSource:
     def download(self, remote_file: RemoteFile) -> bytes:
         if not DRIVE_FILE_ID.fullmatch(remote_file.id):
             raise ValueError("Identifiant Google Drive invalide")
+        if (
+            not remote_file.name.lower().endswith(".epub")
+            or remote_file.mime_type != "application/epub+zip"
+        ):
+            raise ValueError("Seuls les fichiers EPUB peuvent être téléchargés")
         try:
             return self._download_with_gdown(remote_file)
         except FileURLRetrievalError:

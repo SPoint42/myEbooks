@@ -216,7 +216,7 @@ def publish_catalog_release(artifact: CatalogArtifact, *, project_dir: Path) -> 
         "Catalogue myEbooks généré localement.\n\n"
         f"- Livres disponibles : {artifact.book_count}\n"
         f"- Vignettes : {artifact.cover_count}\n"
-        "- Contenu : métadonnées SQLite et vignettes, sans fichier EPUB/PDF."
+        "- Contenu : métadonnées SQLite et vignettes, sans fichier EPUB source."
     )
     subprocess.run(
         [

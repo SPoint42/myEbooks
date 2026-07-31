@@ -36,14 +36,22 @@ def test_local_folder_lists_recursively_and_reads_ebooks(settings, tmp_path):
 def test_local_download_can_rebuild_its_safe_path_mapping(settings, tmp_path):
     library = tmp_path / "ebooks"
     library.mkdir()
-    path = library / "book.pdf"
-    path.write_bytes(b"pdf content")
+    path = library / "book.epub"
+    path.write_bytes(demo_epub())
     first_source = make_source(settings, library)
     remote_file = first_source.list_files()[0]
 
     fresh_source = make_source(settings, library)
 
-    assert fresh_source.download(remote_file) == b"pdf content"
+    assert fresh_source.download(remote_file) == demo_epub()
+
+
+def test_local_folder_ignores_pdf_files(settings, tmp_path):
+    library = tmp_path / "ebooks"
+    library.mkdir()
+    (library / "ignored.pdf").write_bytes(b"%PDF-1.7")
+
+    assert make_source(settings, library).list_files() == []
 
 
 def test_local_folder_ignores_symbolic_links(settings, tmp_path):

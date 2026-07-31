@@ -20,6 +20,15 @@ def _positive_int(name: str, default: int) -> int:
     return value
 
 
+def _boolean(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name, "1" if default else "0").strip().lower()
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(f"{name} doit être un booléen")
+
+
 @dataclass(frozen=True, slots=True)
 class Settings:
     data_dir: Path
@@ -29,6 +38,8 @@ class Settings:
     google_drive_folder_id: str | None = None
     google_drive_public_url: str | None = None
     local_library_dir: Path | None = None
+    background_index: bool = False
+    force_index_on_start: bool = False
     max_file_size: int = 150 * 1024 * 1024
     max_epub_expanded_size: int = 300 * 1024 * 1024
     max_epub_entries: int = 10_000
@@ -63,6 +74,8 @@ class Settings:
             local_library_dir=(
                 Path(local_library).expanduser().resolve() if local_library else None
             ),
+            background_index=_boolean("EBOOK_BACKGROUND_INDEX"),
+            force_index_on_start=_boolean("EBOOK_FORCE_INDEX_ON_START"),
             max_file_size=_positive_int("EBOOK_MAX_FILE_SIZE", 150 * 1024 * 1024),
             max_epub_expanded_size=_positive_int(
                 "EBOOK_MAX_EPUB_EXPANDED_SIZE", 300 * 1024 * 1024
