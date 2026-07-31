@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "myebooks"
-version = "0.3.0"
+version = "0.4.0"
 description = "A small, self-hosted web library for PDF and EPUB files stored on Google Drive."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -19,7 +19,6 @@ dependencies = [
   "httpx>=0.28",
   "jinja2>=3.1",
   "pymupdf>=1.25",
-  "python-multipart>=0.0.20",
   "uvicorn[standard]>=0.34",
 ]
 
@@ -32,6 +31,7 @@ dev = [
 
 [project.scripts]
 myebooks = "myebooks.main:run"
+myebooks-catalog = "myebooks.catalog_cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/myebooks"]

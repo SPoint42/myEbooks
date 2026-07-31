@@ -1,6 +1,8 @@
 services:
   myebooks:
-    build: .
+    build:
+      context: .
+      target: runtime
     ports:
       - "8000:8000"
     environment:
@@ -11,9 +13,6 @@ services:
       GOOGLE_DRIVE_FOLDER_ID: ${GOOGLE_DRIVE_FOLDER_ID:-}
       GOOGLE_DRIVE_ID: ${GOOGLE_DRIVE_ID:-}
     volumes:
-      - myebooks-data:/app/data
+      - ./data:/app/data:ro
       # Décommentez et adaptez pour le mode Google :
       # - ./service-account.json:/run/secrets/google.json:ro
-
-volumes:
-  myebooks-data:

@@ -11,5 +11,8 @@ __pycache__/
 .coverage
 htmlcov/
 data/
+dist/
+deploy/catalog/*
+!deploy/catalog/.gitkeep
 credentials*.json
 service-account*.json

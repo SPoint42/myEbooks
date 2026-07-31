@@ -12,8 +12,17 @@ COPY pyproject.toml README.md LICENSE ./
 COPY src ./src
 RUN pip install --no-cache-dir .
 
-RUN mkdir -p /app/data && chown -R myebooks:myebooks /app
+RUN mkdir -p /app/data/covers && chown -R myebooks:myebooks /app
 USER myebooks
 
 EXPOSE 8000
-CMD ["uvicorn", "myebooks.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["python", "-m", "myebooks.main"]
+
+FROM runtime AS scaleway
+
+USER root
+COPY --chown=myebooks:myebooks deploy/catalog/ /app/data/
+RUN test -s /app/data/myebooks.sqlite3 \
+    && test -s /app/data/manifest.json \
+    && test -d /app/data/covers
+USER myebooks

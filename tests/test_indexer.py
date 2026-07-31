@@ -28,7 +28,7 @@ def test_index_is_incremental_and_stores_books(settings):
     assert first.failed == 0
     assert second.indexed == 0
     assert second.unchanged == 2
-    assert [book.title for book in books] == ["Clean Code", "The Pragmatic Programmer"]
+    assert [book.title for book in books] == ["The Pragmatic Programmer", "Clean Code"]
     assert all(book.cover_filename for book in books)
     assert all((settings.covers_dir / book.cover_filename).is_file() for book in books)
 

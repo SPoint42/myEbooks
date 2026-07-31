@@ -2,10 +2,17 @@
 
 Les scripts opérationnels de `myEbooks` sont regroupés dans ce répertoire.
 
-- `start_dev` prépare l’environnement Python et lance le serveur de développement avec une
-  bibliothèque locale. Son option `--kobo` ouvre l’écoute sur le réseau local et affiche
-  l’adresse simplifiée `/kobo` à saisir sur la liseuse. L’option `--drive-url` remplace la
-  bibliothèque locale par un dossier Google Drive public.
+- `start_dev` prépare l’environnement Python, met à jour le catalogue local puis lance le
+  serveur Web en lecture seule. Son option `--kobo` ouvre l’écoute sur le réseau local.
+- `index_catalog` met uniquement à jour `data/myebooks.sqlite3` et les vignettes locales.
+- `build_catalog` indexe puis génère une archive vérifiable dans `dist/` et prépare
+  `deploy/catalog/` pour construire l’image Scaleway.
+- `publish_catalog` réalise le même travail puis publie l’archive et son SHA-256 dans une
+  GitHub Release avec `gh`. Il ne publie jamais les fichiers EPUB/PDF.
+- `install_catalog --tag catalog-YYYYMMDDTHHMMSSZ` récupère une Release, vérifie son SHA-256
+  et installe son contenu dans `deploy/catalog/` avant un build Docker.
+- `build_scaleway_image` construit localement l’image `linux/amd64` attendue par Scaleway, sans
+  la publier dans un registre.
 
 Le fichier `../start_dev` est uniquement un point d’entrée court permettant d’exécuter
 `./start_dev` depuis la racine du dépôt.

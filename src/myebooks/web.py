@@ -6,29 +6,23 @@ import secrets
 import unicodedata
 from dataclasses import asdict
 from pathlib import Path
-from typing import Annotated
 from urllib.parse import quote, urlencode
 
 import pymupdf
-from fastapi import BackgroundTasks, FastAPI, Form, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import (
     HTMLResponse,
     JSONResponse,
-    RedirectResponse,
     Response,
     StreamingResponse,
 )
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from .adapters.google_drive import GoogleDriveSource
-from .adapters.local_folder import LocalFolderSource
-from .adapters.public_google_drive import PublicGoogleDriveSource
 from .config import Settings
 from .database import LibraryDatabase
-from .demo import FakeDriveSource
 from .domain import EbookSource, RemoteFile
-from .indexer import IndexAlreadyRunning, LibraryIndexer
+from .sources import create_source, source_label
 
 LOGGER = logging.getLogger(__name__)
 PACKAGE_DIR = Path(__file__).parent
@@ -87,38 +81,24 @@ def create_app(
     source: EbookSource | None = None,
 ) -> FastAPI:
     settings = settings or Settings.from_env()
-    settings.data_dir.mkdir(parents=True, exist_ok=True)
-    settings.covers_dir.mkdir(parents=True, exist_ok=True)
-
-    database = LibraryDatabase(settings.database_path)
-    database.initialize()
+    database = LibraryDatabase(settings.database_path, read_only=True)
+    database.validate_catalog()
+    if not settings.covers_dir.is_dir():
+        raise FileNotFoundError(
+            f"Répertoire de vignettes introuvable : {settings.covers_dir}. "
+            "Installez un catalogue complet avant de démarrer l'application."
+        )
     if source is None:
-        if settings.source == "google":
-            source = GoogleDriveSource(settings)
-        elif settings.source == "google_public":
-            source = PublicGoogleDriveSource(settings)
-        elif settings.source == "local":
-            source = LocalFolderSource(settings)
-        else:
-            source = FakeDriveSource()
-    indexer = LibraryIndexer(settings, database, source)
+        source = create_source(settings)
     templates = Jinja2Templates(directory=PACKAGE_DIR / "templates")
 
-    app = FastAPI(title="myEbooks", version="0.3.0")
+    app = FastAPI(title="myEbooks", version="0.4.0")
     app.state.settings = settings
     app.state.database = database
-    app.state.indexer = indexer
     app.mount("/static", StaticFiles(directory=PACKAGE_DIR / "static"), name="static")
     app.mount("/covers", StaticFiles(directory=settings.covers_dir), name="covers")
 
-    def sync_status() -> dict[str, object] | None:
-        sync = database.latest_sync()
-        if sync is not None:
-            sync["processed"] = int(sync["indexed"]) + int(sync["unchanged"]) + int(sync["failed"])
-        return sync
-
     def library_context(request: Request) -> dict[str, object]:
-        csrf_token = request.cookies.get("myebooks_csrf") or secrets.token_urlsafe(32)
         query = " ".join(request.query_params.get("q", "").split())[:100]
         authors = database.list_authors()
         requested_author = " ".join(request.query_params.get("author", "").split())[:300]
@@ -176,17 +156,7 @@ def create_app(
             "next_page": page + 1,
             "previous_page_url": page_url(page - 1) if page > 1 else None,
             "next_page_url": page_url(page + 1) if page < total_pages else None,
-            "sync": sync_status(),
-            "source_name": (
-                "Google Drive public"
-                if settings.source == "google_public"
-                else "Google Drive"
-                if settings.source == "google"
-                else "Dossier local"
-                if settings.source == "local"
-                else "Drive de démonstration"
-            ),
-            "csrf_token": csrf_token,
+            "source_name": source_label(settings),
             "kobo_download_paths": {
                 book.id: (
                     f"/kobo/books/{book.id}/"
@@ -203,14 +173,6 @@ def create_app(
             name=template_name,
             context=context,
         )
-        response.set_cookie(
-            "myebooks_csrf",
-            str(context["csrf_token"]),
-            httponly=True,
-            samesite="strict",
-            secure=request.url.scheme == "https",
-            max_age=86_400,
-        )
         response.headers["Cache-Control"] = "no-store, max-age=0"
         response.headers["Pragma"] = "no-cache"
         return response
@@ -224,31 +186,6 @@ def create_app(
     def kobo_library(request: Request) -> HTMLResponse:
         return render_library(request, "kobo.html")
 
-    @app.get("/pandaIndexKobo", response_class=HTMLResponse)
-    def panda_index_kobo(request: Request) -> HTMLResponse:
-        return render_library(request, "panda_index_kobo.html")
-
-    def run_index(force: bool) -> None:
-        try:
-            indexer.run(force=force)
-        except IndexAlreadyRunning:
-            LOGGER.info("Demande d'indexation ignorée : une exécution est déjà en cours")
-        except Exception:
-            LOGGER.exception("L'indexation a échoué")
-
-    @app.post("/pandaIndexKobo/index", response_class=RedirectResponse)
-    def start_hidden_index(
-        request: Request,
-        background_tasks: BackgroundTasks,
-        csrf_token: Annotated[str, Form()],
-        force: Annotated[str | None, Form()] = None,
-    ) -> RedirectResponse:
-        cookie_token = request.cookies.get("myebooks_csrf", "")
-        if not cookie_token or not secrets.compare_digest(cookie_token, csrf_token):
-            raise HTTPException(status_code=403, detail="Jeton CSRF invalide")
-        background_tasks.add_task(run_index, force == "on")
-        return RedirectResponse(url="/pandaIndexKobo", status_code=303)
-
     @app.get("/api/books", response_class=JSONResponse)
     def api_books(request: Request) -> list[dict[str, object]]:
         result = []
@@ -261,10 +198,6 @@ def create_app(
             )
             result.append(item)
         return result
-
-    @app.get("/api/index/status", response_class=JSONResponse)
-    def api_index_status() -> dict[str, object]:
-        return sync_status() or {"status": "never_run", "processed": 0}
 
     @app.get("/kobo/covers/{book_id}.png", name="kobo_cover")
     def kobo_cover(book_id: int) -> Response:

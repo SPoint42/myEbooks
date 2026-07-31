@@ -61,7 +61,7 @@ usage() {
     cat <<'EOF'
 Usage: ./start_dev [options]
 
-Lance myEbooks en développement avec un dossier local ou un Drive public.
+Indexe localement puis lance myEbooks en lecture seule avec un dossier ou un Drive public.
 
 Options:
   --host ADRESSE       Adresse d'écoute (défaut : 127.0.0.1)
@@ -70,6 +70,7 @@ Options:
   --library DOSSIER    Dossier contenant les EPUB/PDF
   --drive-url URL      URL HTTPS d'un dossier Google Drive public
   --data DOSSIER       Dossier de la base SQLite et des couvertures
+  --force-index        Réanalyse tous les ebooks avant le démarrage
   --reload             Active le rechargement automatique (défaut)
   --no-reload          Désactive le rechargement automatique
   -h, --help           Affiche cette aide
@@ -85,6 +86,8 @@ Exemple avec un Drive public et une Kobo :
   ./start_dev --kobo --drive-url 'https://drive.google.com/drive/folders/IDENTIFIANT'
 EOF
 }
+
+FORCE_INDEX=0
 
 require_value() {
     if [[ $# -lt 2 || -z "${2:-}" ]]; then
@@ -136,6 +139,10 @@ while [[ $# -gt 0 ]]; do
             require_value "$@"
             DATA_DIR="$2"
             shift 2
+            ;;
+        --force-index)
+            FORCE_INDEX=1
+            shift
             ;;
         --reload)
             RELOAD=1
@@ -215,6 +222,23 @@ else
     unset GOOGLE_DRIVE_PUBLIC_URL
 fi
 
+index_command=(
+    "$PYTHON" -m myebooks.catalog_cli index
+    --data "$DATA_DIR"
+)
+if [[ "$SOURCE_MODE" == "google_public" ]]; then
+    index_command+=(--drive-url "$DRIVE_URL")
+else
+    index_command+=(--library "$LIBRARY_DIR")
+fi
+if [[ "$FORCE_INDEX" == "1" ]]; then
+    index_command+=(--force)
+fi
+
+echo
+echo "Mise à jour locale du catalogue avant le démarrage…"
+"${index_command[@]}"
+
 command=(
     "$PYTHON" -m uvicorn myebooks.main:app
     --host "$HOST"
@@ -240,7 +264,6 @@ if [[ "$KOBO_MODE" == "1" || "$HOST" == "0.0.0.0" ]]; then
     echo "  Écoute réseau : http://0.0.0.0:${PORT}"
     if [[ -n "$LAN_IP" ]]; then
         echo "  Adresse Kobo  : http://${LAN_IP}:${PORT}/kobo"
-        echo "  Administration: http://${LAN_IP}:${PORT}/pandaIndexKobo"
     else
         echo "  Adresse Kobo  : IP locale non détectée ; consultez la sortie de ifconfig."
     fi
@@ -249,7 +272,6 @@ if [[ "$KOBO_MODE" == "1" || "$HOST" == "0.0.0.0" ]]; then
     echo "Si macOS le demande, autorisez Python à accepter les connexions entrantes."
 else
     echo "  Adresse       : http://${HOST}:${PORT}"
-    echo "  Administration: http://${HOST}:${PORT}/pandaIndexKobo"
 fi
 echo
 echo "Arrêt : Ctrl+C"

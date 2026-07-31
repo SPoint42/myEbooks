@@ -1,23 +1,44 @@
 from __future__ import annotations
 
 import re
+from contextlib import closing
 
 from fastapi.testclient import TestClient
 
+from myebooks.database import LibraryDatabase
 from myebooks.demo import FakeDriveSource
-from myebooks.domain import ExtractedBook, IndexResult, RemoteFile
+from myebooks.domain import ExtractedBook, RemoteFile
+from myebooks.indexer import LibraryIndexer
 from myebooks.web import _safe_download_name, create_app
 
 
+def initialize_catalog(settings) -> LibraryDatabase:
+    settings.data_dir.mkdir(parents=True, exist_ok=True)
+    settings.covers_dir.mkdir(parents=True, exist_ok=True)
+    database = LibraryDatabase(settings.database_path)
+    database.initialize()
+    return database
+
+
+def index_fake_catalog(settings, source: FakeDriveSource | None = None) -> FakeDriveSource:
+    source = source or FakeDriveSource()
+    database = initialize_catalog(settings)
+    LibraryIndexer(settings, database, source).run()
+    return source
+
+
 def add_books(
-    app,
+    settings,
     count: int,
     *,
     prefix: str = "Livre",
     author: str = "Auteur Pagination",
 ) -> None:
+    database = LibraryDatabase(settings.database_path)
+    if not settings.database_path.exists():
+        initialize_catalog(settings)
     for number in range(count):
-        app.state.database.upsert_book(
+        database.upsert_book(
             RemoteFile(
                 id=f"pagination-source-{prefix}-{number}",
                 name=f"{prefix}-{number:02d}.epub",
@@ -29,78 +50,40 @@ def add_books(
         )
 
 
-def test_library_can_be_indexed_from_web(settings):
-    app = create_app(settings, FakeDriveSource())
+def test_library_uses_catalog_built_outside_the_web_process(settings):
+    source = index_fake_catalog(settings)
+    app = create_app(settings, source)
 
     with TestClient(app) as client:
         first_page = client.get("/")
-        csrf_token = client.cookies.get("myebooks_csrf")
-        response = client.post(
-            "/pandaIndexKobo/index",
-            data={"csrf_token": csrf_token},
-            follow_redirects=False,
-        )
         books = client.get("/api/books").json()
-        status = client.get("/api/index/status").json()
 
     assert first_page.status_code == 200
-    assert "Votre bibliothèque attend" in first_page.text
+    assert "Clean Code" in first_page.text
+    assert "The Pragmatic Programmer" in first_page.text
     assert "<script" not in first_page.text
-    assert response.status_code == 303
     assert len(books) == 2
     assert all(book["cover_url"] for book in books)
-    assert status["status"] == "completed"
 
 
-def test_index_endpoint_rejects_invalid_csrf(settings):
+def test_all_indexation_endpoints_are_removed(settings):
+    initialize_catalog(settings)
     app = create_app(settings, FakeDriveSource())
 
     with TestClient(app) as client:
-        client.get("/")
-        response = client.post("/pandaIndexKobo/index", data={"csrf_token": "invalid"})
+        responses = (
+            client.get("/pandaIndexKobo"),
+            client.post("/pandaIndexKobo/index"),
+            client.get("/api/index/status"),
+            client.post("/admin/index"),
+            client.post("/kobo/index"),
+        )
 
-    assert response.status_code == 403
-
-
-def test_index_controls_are_only_on_unlinked_admin_page(settings):
-    app = create_app(settings, FakeDriveSource())
-
-    with TestClient(app) as client:
-        public_page = client.get("/")
-        kobo_page = client.get("/kobo")
-        admin_page = client.get("/pandaIndexKobo")
-        old_admin_endpoint = client.post("/admin/index")
-        old_kobo_endpoint = client.post("/kobo/index")
-
-    for page in (public_page, kobo_page):
-        assert "pandaIndexKobo" not in page.text
-        assert "INDEXER LA BIBLIOTHEQUE" not in page.text
-        assert "Indexation en cours" not in page.text
-    assert 'action="/pandaIndexKobo/index"' in admin_page.text
-    assert "INDEXER LA BIBLIOTHEQUE" in admin_page.text
-    assert old_admin_endpoint.status_code == 404
-    assert old_kobo_endpoint.status_code == 404
-
-
-def test_running_index_displays_processed_books_and_total(settings):
-    app = create_app(settings, FakeDriveSource())
-    sync_id = app.state.database.start_sync()
-    app.state.database.update_sync_progress(
-        sync_id,
-        IndexResult(discovered=1_044, indexed=31, unchanged=6, failed=0),
-    )
-
-    with TestClient(app) as client:
-        page = client.get("/pandaIndexKobo")
-        status = client.get("/api/index/status").json()
-
-    assert "37 livre(s) traité(s) sur 1044" in page.text
-    assert '<meta http-equiv="refresh" content="5">' in page.text
-    assert status["processed"] == 37
-    assert status["discovered"] == 1_044
+    assert all(response.status_code == 404 for response in responses)
 
 
 def test_health_endpoint(settings):
+    initialize_catalog(settings)
     app = create_app(settings, FakeDriveSource())
 
     with TestClient(app) as client:
@@ -110,16 +93,20 @@ def test_health_endpoint(settings):
     assert response.json() == {"status": "ok"}
 
 
+def test_missing_catalog_prevents_startup(settings):
+    try:
+        create_app(settings, FakeDriveSource())
+    except FileNotFoundError as exc:
+        assert "script local d'indexation" in str(exc)
+    else:
+        raise AssertionError("Une application sans catalogue ne doit pas démarrer")
+
+
 def test_indexed_epub_can_be_downloaded_for_kobo(settings):
-    source = FakeDriveSource()
+    source = index_fake_catalog(settings)
     app = create_app(settings, source)
 
     with TestClient(app) as client:
-        client.get("/")
-        client.post(
-            "/pandaIndexKobo/index",
-            data={"csrf_token": client.cookies.get("myebooks_csrf")},
-        )
         books = client.get("/api/books").json()
         epub = next(book for book in books if book["file_format"] == "epub")
         response = client.get(f"/books/{epub['id']}/download")
@@ -132,6 +119,7 @@ def test_indexed_epub_can_be_downloaded_for_kobo(settings):
 
 
 def test_unknown_book_cannot_be_downloaded(settings):
+    initialize_catalog(settings)
     app = create_app(settings, FakeDriveSource())
 
     with TestClient(app) as client:
@@ -141,14 +129,10 @@ def test_unknown_book_cannot_be_downloaded(settings):
 
 
 def test_search_works_without_javascript(settings):
-    app = create_app(settings, FakeDriveSource())
+    source = index_fake_catalog(settings)
+    app = create_app(settings, source)
 
     with TestClient(app) as client:
-        client.get("/")
-        client.post(
-            "/pandaIndexKobo/index",
-            data={"csrf_token": client.cookies.get("myebooks_csrf")},
-        )
         response = client.get("/?q=Pragmatic")
 
     assert response.status_code == 200
@@ -158,9 +142,31 @@ def test_search_works_without_javascript(settings):
     assert "<script" not in response.text
 
 
-def test_web_library_paginates_at_ten_books_and_preserves_search(settings):
+def test_home_displays_most_recently_indexed_books_first(settings):
+    database = initialize_catalog(settings)
+    add_books(settings, 2, prefix="Date")
+    with closing(database.connect()) as connection, connection:
+        connection.execute(
+            "UPDATE books SET title = ?, indexed_at = ? WHERE source_id = ?",
+            ("Ancien livre", "2025-01-01T00:00:00+00:00", "pagination-source-Date-0"),
+        )
+        connection.execute(
+            "UPDATE books SET title = ?, indexed_at = ? WHERE source_id = ?",
+            ("Nouveau livre", "2026-07-31T12:00:00+00:00", "pagination-source-Date-1"),
+        )
     app = create_app(settings, FakeDriveSource())
-    add_books(app, 23)
+
+    with TestClient(app) as client:
+        page = client.get("/")
+        books = client.get("/api/books").json()
+
+    assert [book["title"] for book in books] == ["Nouveau livre", "Ancien livre"]
+    assert page.text.index("Nouveau livre") < page.text.index("Ancien livre")
+
+
+def test_web_library_paginates_at_ten_books_and_preserves_search(settings):
+    add_books(settings, 23)
+    app = create_app(settings, FakeDriveSource())
 
     with TestClient(app) as client:
         first_page = client.get("/?q=Livre")
@@ -178,8 +184,8 @@ def test_web_library_paginates_at_ten_books_and_preserves_search(settings):
 
 
 def test_kobo_library_uses_native_pagination_forms(settings):
+    add_books(settings, 23)
     app = create_app(settings, FakeDriveSource())
-    add_books(app, 23)
 
     with TestClient(app) as client:
         first_page = client.get("/kobo?q=Livre")
@@ -196,8 +202,8 @@ def test_kobo_library_uses_native_pagination_forms(settings):
 
 
 def test_invalid_or_excessive_page_is_safely_normalized(settings):
+    add_books(settings, 23)
     app = create_app(settings, FakeDriveSource())
-    add_books(app, 23)
 
     with TestClient(app) as client:
         invalid_page = client.get("/?page=invalid")
@@ -210,9 +216,9 @@ def test_invalid_or_excessive_page_is_safely_normalized(settings):
 
 
 def test_author_select_comes_from_database_and_filters_web_and_kobo(settings):
+    add_books(settings, 12, prefix="Alpha", author="Auteur Alpha")
+    add_books(settings, 5, prefix="Beta", author="Auteur Beta")
     app = create_app(settings, FakeDriveSource())
-    add_books(app, 12, prefix="Alpha", author="Auteur Alpha")
-    add_books(app, 5, prefix="Beta", author="Auteur Beta")
 
     assert app.state.database.list_authors() == ["Auteur Alpha", "Auteur Beta"]
 
@@ -231,8 +237,8 @@ def test_author_select_comes_from_database_and_filters_web_and_kobo(settings):
 
 
 def test_unknown_author_filter_is_ignored(settings):
+    add_books(settings, 2, author="Auteur connu")
     app = create_app(settings, FakeDriveSource())
-    add_books(app, 2, author="Auteur connu")
 
     with TestClient(app) as client:
         response = client.get("/?author=Auteur+inconnu")
@@ -243,6 +249,7 @@ def test_unknown_author_filter_is_ignored(settings):
 
 
 def test_kobo_user_agent_gets_legacy_page(settings):
+    initialize_catalog(settings)
     app = create_app(settings, FakeDriveSource())
 
     with TestClient(app) as client:
@@ -256,15 +263,10 @@ def test_kobo_user_agent_gets_legacy_page(settings):
 
 
 def test_kobo_download_uses_file_extension_and_legacy_headers(settings):
-    source = FakeDriveSource()
+    source = index_fake_catalog(settings)
     app = create_app(settings, source)
 
     with TestClient(app) as client:
-        client.get("/kobo")
-        client.post(
-            "/pandaIndexKobo/index",
-            data={"csrf_token": client.cookies.get("myebooks_csrf")},
-        )
         page = client.get("/kobo")
         match = re.search(r'action="(/kobo/books/\d+/[^"]+\.epub)"', page.text)
         assert match is not None
@@ -282,28 +284,20 @@ def test_kobo_download_uses_file_extension_and_legacy_headers(settings):
 
 
 def test_kobo_download_rejects_a_mismatched_filename(settings):
-    app = create_app(settings, FakeDriveSource())
+    source = index_fake_catalog(settings)
+    app = create_app(settings, source)
 
     with TestClient(app) as client:
-        client.get("/kobo")
-        client.post(
-            "/pandaIndexKobo/index",
-            data={"csrf_token": client.cookies.get("myebooks_csrf")},
-        )
         response = client.get("/kobo/books/1/not-the-book.epub")
 
     assert response.status_code == 404
 
 
 def test_kobo_cover_is_a_small_relative_png(settings):
-    app = create_app(settings, FakeDriveSource())
+    source = index_fake_catalog(settings)
+    app = create_app(settings, source)
 
     with TestClient(app) as client:
-        client.get("/kobo")
-        client.post(
-            "/pandaIndexKobo/index",
-            data={"csrf_token": client.cookies.get("myebooks_csrf")},
-        )
         page = client.get("/kobo")
         match = re.search(r'src="(/kobo/covers/(\d+)\.png)"', page.text)
         assert match is not None
@@ -317,6 +311,7 @@ def test_kobo_cover_is_a_small_relative_png(settings):
 
 
 def test_unknown_kobo_cover_returns_404(settings):
+    initialize_catalog(settings)
     app = create_app(settings, FakeDriveSource())
 
     with TestClient(app) as client:

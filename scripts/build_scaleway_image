@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
+IMAGE_TAG="${MYEBOOKS_IMAGE_TAG:-myebooks:scaleway-local}"
+CONTAINER_ENGINE="${MYEBOOKS_CONTAINER_ENGINE:-}"
+
+usage() {
+    cat <<'EOF'
+Usage: ./scripts/build_scaleway_image [--tag NOM]
+
+Construit localement, sans la publier, l'image linux/amd64 destinée à Scaleway.
+
+Options:
+  --tag NOM     Nom local de l'image (défaut : myebooks:scaleway-local)
+  -h, --help    Affiche cette aide
+
+Variables équivalentes : MYEBOOKS_IMAGE_TAG et MYEBOOKS_CONTAINER_ENGINE.
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --tag)
+            if [[ $# -lt 2 || -z "${2:-}" || "$2" == -* ]]; then
+                echo "Erreur : une valeur est requise après --tag." >&2
+                exit 2
+            fi
+            IMAGE_TAG="$2"
+            shift 2
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            echo "Erreur : option inconnue : $1" >&2
+            usage >&2
+            exit 2
+            ;;
+    esac
+done
+
+if [[ -z "$CONTAINER_ENGINE" ]]; then
+    if command -v podman >/dev/null 2>&1; then
+        CONTAINER_ENGINE=podman
+    elif command -v docker >/dev/null 2>&1; then
+        CONTAINER_ENGINE=docker
+    else
+        echo "Erreur : Podman ou Docker est requis." >&2
+        exit 1
+    fi
+fi
+
+if [[ "$CONTAINER_ENGINE" != "podman" && "$CONTAINER_ENGINE" != "docker" ]]; then
+    echo "Erreur : MYEBOOKS_CONTAINER_ENGINE doit valoir podman ou docker." >&2
+    exit 2
+fi
+
+cd "$PROJECT_DIR"
+exec "$CONTAINER_ENGINE" build \
+    --platform linux/amd64 \
+    --target scaleway \
+    --tag "$IMAGE_TAG" \
+    .

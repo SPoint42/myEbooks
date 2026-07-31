@@ -9,16 +9,32 @@ from .domain import Book, ExtractedBook, IndexResult, RemoteFile
 
 
 class LibraryDatabase:
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, *, read_only: bool = False) -> None:
         self.path = path
+        self.read_only = read_only
 
     def connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.path, timeout=30)
+        if self.read_only:
+            if not self.path.is_file():
+                raise FileNotFoundError(
+                    f"Catalogue SQLite introuvable : {self.path}. "
+                    "Exécutez d'abord le script local d'indexation."
+                )
+            database_uri = f"{self.path.resolve().as_uri()}?mode=ro"
+            connection = sqlite3.connect(database_uri, timeout=30, uri=True)
+            connection.execute("PRAGMA query_only = ON")
+        else:
+            connection = sqlite3.connect(self.path, timeout=30)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON")
         return connection
 
+    def _require_writable(self) -> None:
+        if self.read_only:
+            raise RuntimeError("Le catalogue déployé est ouvert en lecture seule")
+
     def initialize(self) -> None:
+        self._require_writable()
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with closing(self.connect()) as connection, connection:
             connection.execute("PRAGMA journal_mode = WAL")
@@ -43,6 +59,9 @@ class LibraryDatabase:
                 CREATE INDEX IF NOT EXISTS idx_books_available_title
                     ON books (available, title COLLATE NOCASE);
 
+                CREATE INDEX IF NOT EXISTS idx_books_available_indexed_at
+                    ON books (available, indexed_at DESC, id DESC);
+
                 CREATE TABLE IF NOT EXISTS sync_runs (
                     id INTEGER PRIMARY KEY,
                     status TEXT NOT NULL CHECK (status IN ('running', 'completed', 'failed')),
@@ -58,6 +77,31 @@ class LibraryDatabase:
                 """
             )
 
+    def validate_catalog(self) -> None:
+        with closing(self.connect()) as connection:
+            tables = {
+                str(row[0])
+                for row in connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table'"
+                ).fetchall()
+            }
+            missing = {"books", "sync_runs"} - tables
+            if missing:
+                raise RuntimeError(
+                    "Catalogue SQLite invalide : table(s) absente(s) : "
+                    + ", ".join(sorted(missing))
+                )
+            integrity = connection.execute("PRAGMA quick_check").fetchone()
+            if integrity is None or integrity[0] != "ok":
+                raise RuntimeError("Catalogue SQLite invalide : contrôle d'intégrité en échec")
+
+    def prepare_for_read_only(self) -> None:
+        self._require_writable()
+        with closing(self.connect()) as connection:
+            connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            connection.execute("PRAGMA journal_mode = DELETE")
+            connection.execute("PRAGMA optimize")
+
     def list_books(self) -> list[Book]:
         with closing(self.connect()) as connection:
             rows = connection.execute(
@@ -66,7 +110,7 @@ class LibraryDatabase:
                        publication_year, isbn, cover_filename, parse_error, indexed_at
                 FROM books
                 WHERE available = 1
-                ORDER BY title COLLATE NOCASE
+                ORDER BY indexed_at DESC, id DESC
                 """
             ).fetchall()
         return [Book(**dict(row)) for row in rows]
@@ -118,6 +162,7 @@ class LibraryDatabase:
         cover_filename: str | None,
         parse_error: str | None = None,
     ) -> None:
+        self._require_writable()
         now = datetime.now(UTC).isoformat()
         file_format = remote_file.name.rsplit(".", 1)[-1].lower()
         with closing(self.connect()) as connection, connection:
@@ -157,6 +202,7 @@ class LibraryDatabase:
             )
 
     def mark_missing(self, present_source_ids: set[str]) -> tuple[int, list[str]]:
+        self._require_writable()
         with closing(self.connect()) as connection, connection:
             rows = connection.execute(
                 "SELECT source_id, cover_filename FROM books WHERE available = 1"
@@ -170,6 +216,7 @@ class LibraryDatabase:
         return len(missing), covers
 
     def start_sync(self) -> int:
+        self._require_writable()
         with closing(self.connect()) as connection, connection:
             cursor = connection.execute(
                 "INSERT INTO sync_runs (status, started_at) VALUES ('running', ?)",
@@ -178,6 +225,7 @@ class LibraryDatabase:
             return int(cursor.lastrowid)
 
     def update_sync_progress(self, sync_id: int, result: IndexResult) -> None:
+        self._require_writable()
         with closing(self.connect()) as connection, connection:
             connection.execute(
                 """
@@ -194,6 +242,7 @@ class LibraryDatabase:
             )
 
     def finish_sync(self, sync_id: int, result: IndexResult) -> None:
+        self._require_writable()
         with closing(self.connect()) as connection, connection:
             connection.execute(
                 """
@@ -213,6 +262,7 @@ class LibraryDatabase:
             )
 
     def fail_sync(self, sync_id: int, error: str) -> None:
+        self._require_writable()
         with closing(self.connect()) as connection, connection:
             connection.execute(
                 """
