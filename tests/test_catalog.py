@@ -138,6 +138,31 @@ def test_reusing_existing_data_stops_an_indexation_in_progress(
     assert database.latest_sync()["status"] == "failed"
 
 
+def test_forced_publication_snapshots_data_despite_a_running_status(
+    settings, tmp_path, monkeypatch
+):
+    database = LibraryDatabase(settings.database_path)
+    database.initialize()
+    sync_id = database.start_sync()
+
+    def unexpected_stop(*_arguments):
+        raise AssertionError("La publication forcée ne doit pas attendre l'indexeur")
+
+    monkeypatch.setattr("myebooks.catalog.request_index_cancellation", unexpected_stop)
+    artifact = build_catalog_artifact(
+        settings,
+        None,
+        output_dir=tmp_path / "dist",
+        staged_catalog=tmp_path / "deploy" / "catalog",
+        skip_index=True,
+        force_publish=True,
+    )
+
+    assert artifact.book_count == 0
+    assert int(database.latest_sync()["id"]) == sync_id
+    assert database.latest_sync()["status"] == "running"
+
+
 def test_catalog_install_rejects_path_traversal(tmp_path):
     archive_path = tmp_path / "myebooks-catalog-unsafe.tar.gz"
     with tarfile.open(archive_path, "w:gz") as archive:
@@ -183,6 +208,7 @@ def test_catalog_scripts_are_executable_and_document_their_actions():
     assert "--drive-url" in result.stdout
     assert "--publish" in result.stdout
     assert "--skip-index" in result.stdout
+    assert "--force-publish" in result.stdout
 
     incompatible = subprocess.run(
         [
@@ -197,6 +223,16 @@ def test_catalog_scripts_are_executable_and_document_their_actions():
     )
     assert incompatible.returncode == 2
     assert "ne peut pas être combiné" in incompatible.stderr
+
+    force_without_skip = subprocess.run(
+        [str(PROJECT_DIR / "scripts" / "build_catalog"), "--force-publish"],
+        cwd=PROJECT_DIR,
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    assert force_without_skip.returncode == 2
+    assert "nécessite --skip-index" in force_without_skip.stderr
 
     image_help = subprocess.run(
         [str(PROJECT_DIR / "scripts" / "build_scaleway_image"), "--help"],

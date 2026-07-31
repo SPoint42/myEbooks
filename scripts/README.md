@@ -10,7 +10,8 @@ Les scripts opérationnels de `myEbooks` sont regroupés dans ce répertoire.
 - `publish_catalog` réalise le même travail puis publie l’archive et son SHA-256 dans une
   GitHub Release avec `gh`. Son option `--skip-index` publie directement le cache `--data`
   existant sans contacter la source et arrête proprement une indexation locale active. Il ne
-  publie jamais les fichiers EPUB/PDF.
+  publie jamais les fichiers EPUB/PDF. `--force-publish` permet d’ignorer un statut d’indexation
+  active considéré comme obsolète.
 - `install_catalog --tag catalog-YYYYMMDDTHHMMSSZ` récupère une Release, vérifie son SHA-256
   et installe son contenu dans `deploy/catalog/` avant un build Docker.
 - `build_scaleway_image` construit localement l’image `linux/amd64` attendue par Scaleway, sans

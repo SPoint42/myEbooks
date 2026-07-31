@@ -167,12 +167,23 @@ def build_catalog_artifact(
     staged_catalog: Path,
     force: bool = False,
     skip_index: bool = False,
+    force_publish: bool = False,
     generated_at: datetime | None = None,
 ) -> CatalogArtifact:
+    if force_publish and not skip_index:
+        raise ValueError("force_publish nécessite skip_index")
     if skip_index:
         database = LibraryDatabase(settings.database_path, read_only=True)
         database.validate_catalog()
-        _stop_running_index(settings)
+        if force_publish:
+            latest_sync = database.latest_sync()
+            if latest_sync is not None and latest_sync["status"] == "running":
+                LOGGER.warning(
+                    "Publication forcée malgré l'indexation %d encore marquée active.",
+                    int(latest_sync["id"]),
+                )
+        else:
+            _stop_running_index(settings)
         latest_sync = database.latest_sync()
         result = IndexResult(
             **{

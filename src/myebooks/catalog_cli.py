@@ -90,6 +90,11 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Publie uniquement le cache --data existant, sans contacter la source",
     )
+    build_parser.add_argument(
+        "--force-publish",
+        action="store_true",
+        help="Ignore un statut d'indexation active avec --skip-index",
+    )
 
     install_parser = commands.add_parser(
         "install", help="Télécharge et vérifie un artefact GitHub avant le build Docker"
@@ -149,6 +154,8 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 0
 
+    if arguments.force_publish and not arguments.skip_index:
+        parser.error("--force-publish nécessite --skip-index")
     if arguments.skip_index:
         if arguments.drive_url or arguments.library or arguments.fake or arguments.force:
             parser.error(
@@ -168,6 +175,7 @@ def main(argv: list[str] | None = None) -> int:
         staged_catalog=PROJECT_DIR / "deploy" / "catalog",
         force=arguments.force,
         skip_index=arguments.skip_index,
+        force_publish=arguments.force_publish,
     )
     print(f"Catalogue généré : {artifact.archive_path}")
     print(f"Checksum SHA-256 : {artifact.checksum_path}")
