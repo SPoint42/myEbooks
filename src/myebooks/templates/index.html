@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Votre bibliothèque PDF et EPUB indexée depuis Google Drive.">
+    <title>myEbooks — Ma bibliothèque</title>
+    <link rel="stylesheet" href="{{ url_for('static', path='/app.css') }}">
+    <script src="{{ url_for('static', path='/app.js') }}" defer></script>
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="/" aria-label="Accueil myEbooks">
+        <span class="brand-mark" aria-hidden="true">mE</span>
+        <span>myEbooks</span>
+      </a>
+      <span class="source-badge">{{ source_name }}</span>
+    </header>
+
+    <main>
+      <section class="hero" aria-labelledby="library-title">
+        <div>
+          <p class="eyebrow">Bibliothèque personnelle</p>
+          <h1 id="library-title">Mes livres, enfin réunis.</h1>
+          <p class="intro">Les métadonnées et couvertures sont extraites de vos fichiers PDF et EPUB.</p>
+        </div>
+        <form action="/admin/index" method="post" class="index-form" data-index-form>
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <label class="force-option">
+            <input type="checkbox" name="force">
+            Tout réanalyser
+          </label>
+          <button class="primary-button" type="submit">
+            <span aria-hidden="true">↻</span>
+            Indexer le Drive
+          </button>
+        </form>
+      </section>
+
+      {% if sync %}
+      <section class="sync-status {{ sync.status }}" data-sync-status data-status="{{ sync.status }}" aria-live="polite">
+        <div>
+          {% if sync.status == 'running' %}
+            <strong>Indexation en cours…</strong>
+            <span>La page se mettra à jour automatiquement.</span>
+          {% elif sync.status == 'completed' %}
+            <strong>Dernière indexation terminée</strong>
+            <span>{{ sync.discovered }} fichier(s), {{ sync.indexed }} indexé(s), {{ sync.unchanged }} inchangé(s){% if sync.failed %}, {{ sync.failed }} en erreur{% endif %}.</span>
+          {% else %}
+            <strong>La dernière indexation a échoué</strong>
+            <span>{{ sync.error or 'Consultez les journaux du serveur.' }}</span>
+          {% endif %}
+        </div>
+      </section>
+      {% endif %}
+
+      <section class="library-tools" aria-label="Outils de la bibliothèque">
+        <p><strong>{{ books|length }}</strong> livre{% if books|length != 1 %}s{% endif %}</p>
+        <label class="search">
+          <span class="sr-only">Rechercher un livre</span>
+          <input type="search" placeholder="Titre, auteur ou ISBN…" data-search autocomplete="off">
+        </label>
+      </section>
+
+      {% if books %}
+      <section class="book-grid" aria-label="Livres" data-book-grid>
+        {% for book in books %}
+        <article class="book-card" data-searchable="{{ book.title }} {{ book.author or '' }} {{ book.isbn or '' }}">
+          <div class="cover-wrap">
+            {% if book.cover_filename %}
+              <img src="{{ url_for('covers', path=book.cover_filename) }}" alt="Couverture de {{ book.title }}" loading="lazy">
+            {% else %}
+              <div class="cover-placeholder" aria-label="Couverture indisponible">
+                <span aria-hidden="true">{{ book.title[:1]|upper }}</span>
+              </div>
+            {% endif %}
+            <span class="format-badge">{{ book.file_format|upper }}</span>
+          </div>
+          <div class="book-info">
+            <h2>{{ book.title }}</h2>
+            <p class="author">{{ book.author or 'Auteur non renseigné' }}</p>
+            <div class="metadata">
+              {% if book.publication_year %}<span>{{ book.publication_year }}</span>{% endif %}
+              {% if book.isbn %}<span>ISBN {{ book.isbn }}</span>{% endif %}
+            </div>
+            {% if book.parse_error %}
+              <p class="parse-error" title="{{ book.parse_error }}">Métadonnées incomplètes</p>
+            {% endif %}
+          </div>
+        </article>
+        {% endfor %}
+      </section>
+      <p class="no-results" data-no-results hidden>Aucun livre ne correspond à cette recherche.</p>
+      {% else %}
+      <section class="empty-state">
+        <span aria-hidden="true">⌁</span>
+        <h2>Votre bibliothèque attend ses premiers livres</h2>
+        <p>Lancez l’indexation pour analyser les PDF et EPUB du Drive configuré.</p>
+      </section>
+      {% endif %}
+    </main>
+
+    <footer>myEbooks · vos fichiers restent sur votre Drive</footer>
+  </body>
+</html>

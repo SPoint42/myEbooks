@@ -1,0 +1,1 @@
+"""External ebook source adapters."""
