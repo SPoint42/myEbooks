@@ -71,6 +71,18 @@ class LibraryDatabase:
             ).fetchall()
         return [Book(**dict(row)) for row in rows]
 
+    def list_authors(self) -> list[str]:
+        with closing(self.connect()) as connection:
+            rows = connection.execute(
+                """
+                SELECT DISTINCT author
+                FROM books
+                WHERE available = 1 AND author IS NOT NULL AND TRIM(author) <> ''
+                ORDER BY author COLLATE NOCASE
+                """
+            ).fetchall()
+        return [str(row[0]) for row in rows]
+
     def book_by_id(self, book_id: int) -> Book | None:
         with closing(self.connect()) as connection:
             row = connection.execute(
@@ -164,6 +176,22 @@ class LibraryDatabase:
                 (datetime.now(UTC).isoformat(),),
             )
             return int(cursor.lastrowid)
+
+    def update_sync_progress(self, sync_id: int, result: IndexResult) -> None:
+        with closing(self.connect()) as connection, connection:
+            connection.execute(
+                """
+                UPDATE sync_runs SET discovered = ?, indexed = ?, unchanged = ?, failed = ?
+                WHERE id = ? AND status = 'running'
+                """,
+                (
+                    result.discovered,
+                    result.indexed,
+                    result.unchanged,
+                    result.failed,
+                    sync_id,
+                ),
+            )
 
     def finish_sync(self, sync_id: int, result: IndexResult) -> None:
         with closing(self.connect()) as connection, connection:

@@ -9,56 +9,36 @@
   </head>
   <body>
     <header class="site-header">
-      <a class="brand" href="/" aria-label="Accueil myEbooks">
-        <span class="brand-mark" aria-hidden="true">mE</span>
-        <span>myEbooks</span>
-      </a>
+      <div class="brand-tools">
+        <a class="brand" href="/" aria-label="Accueil myEbooks">
+          <span class="brand-mark" aria-hidden="true">mE</span>
+          <span>myEbooks</span>
+        </a>
+        <form class="author-filter" action="/" method="get">
+          {% if query %}<input type="hidden" name="q" value="{{ query }}">{% endif %}
+          <label class="sr-only" for="author-filter">Filtrer par auteur</label>
+          <select id="author-filter" name="author">
+            <option value="">Tous les auteurs</option>
+            {% for author in authors %}
+              <option value="{{ author }}"{% if author == selected_author %} selected{% endif %}>{{ author }}</option>
+            {% endfor %}
+          </select>
+          <button type="submit">Afficher</button>
+        </form>
+      </div>
       <span class="source-badge">{{ source_name }}</span>
     </header>
 
     <main>
-      <section class="hero" aria-labelledby="library-title">
-        <div>
-          <p class="eyebrow">Bibliothèque personnelle</p>
-          <h1 id="library-title">Mes livres, enfin réunis.</h1>
-          <p class="intro">Les métadonnées et couvertures sont extraites de vos fichiers PDF et EPUB.</p>
-        </div>
-        <form action="/admin/index" method="post" class="index-form" data-index-form>
-          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-          <label class="force-option">
-            <input type="checkbox" name="force">
-            Tout réanalyser
-          </label>
-          <button class="primary-button" type="submit">
-            <span aria-hidden="true">↻</span>
-            Indexer le Drive
-          </button>
-        </form>
-      </section>
-
-      {% if sync %}
-      <section class="sync-status {{ sync.status }}" aria-live="polite">
-        <div>
-          {% if sync.status == 'running' %}
-            <strong>Indexation en cours…</strong>
-            <span>Vous pouvez <a href="/">actualiser la page</a> dans quelques instants.</span>
-          {% elif sync.status == 'completed' %}
-            <strong>Dernière indexation terminée</strong>
-            <span>{{ sync.discovered }} fichier(s), {{ sync.indexed }} indexé(s), {{ sync.unchanged }} inchangé(s){% if sync.failed %}, {{ sync.failed }} en erreur{% endif %}.</span>
-          {% else %}
-            <strong>La dernière indexation a échoué</strong>
-            <span>{{ sync.error or 'Consultez les journaux du serveur.' }}</span>
-          {% endif %}
-        </div>
-      </section>
-      {% endif %}
 
       <section class="library-tools" aria-label="Outils de la bibliothèque">
         <p>
-          <strong>{{ books|length }}</strong>
-          {% if query %}sur {{ total_books }} {% endif %}livre{% if books|length != 1 %}s{% endif %}
+          <strong>{{ result_count }}</strong>
+          livre{% if result_count != 1 %}s{% endif %}{% if query or selected_author %} trouvé{% if result_count != 1 %}s{% endif %}{% endif %}
+          {% if result_count %} · page {{ page }} sur {{ total_pages }}{% endif %}
         </p>
         <form class="search" action="/" method="get">
+          {% if selected_author %}<input type="hidden" name="author" value="{{ selected_author }}">{% endif %}
           <label class="sr-only" for="book-search">Rechercher un livre</label>
           <input id="book-search" name="q" value="{{ query }}" type="search" placeholder="Titre, auteur ou ISBN…" autocomplete="off">
           <button type="submit">Rechercher</button>
@@ -90,22 +70,37 @@
             {% if book.parse_error %}
               <p class="parse-error" title="{{ book.parse_error }}">Métadonnées incomplètes</p>
             {% endif %}
-            <a class="download-button" href="{{ url_for('download_book', book_id=book.id) }}" download>
+            <a class="download-button" href="{{ url_for('download_book', book_id=book.id) }}" target="_self">
               Télécharger sur Kobo
             </a>
           </div>
         </article>
         {% endfor %}
       </section>
+      {% if total_pages > 1 %}
+      <nav class="pagination" aria-label="Pagination de la bibliothèque">
+        {% if has_previous_page %}
+          <a href="{{ previous_page_url }}" rel="prev">← Page précédente</a>
+        {% else %}
+          <span aria-disabled="true">← Page précédente</span>
+        {% endif %}
+        <strong>Page {{ page }} sur {{ total_pages }}</strong>
+        {% if has_next_page %}
+          <a href="{{ next_page_url }}" rel="next">Page suivante →</a>
+        {% else %}
+          <span aria-disabled="true">Page suivante →</span>
+        {% endif %}
+      </nav>
+      {% endif %}
       {% else %}
       <section class="empty-state">
         <span aria-hidden="true">⌁</span>
-        {% if query %}
+        {% if query or selected_author %}
           <h2>Aucun livre trouvé</h2>
           <p><a href="/">Afficher toute la bibliothèque</a></p>
         {% else %}
           <h2>Votre bibliothèque attend ses premiers livres</h2>
-          <p>Lancez l’indexation pour analyser les PDF et EPUB du Drive configuré.</p>
+          <p>Aucun livre n’est disponible pour le moment.</p>
         {% endif %}
       </section>
       {% endif %}

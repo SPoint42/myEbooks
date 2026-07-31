@@ -1,0 +1,259 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
+
+HOST="${MYEBOOKS_HOST:-127.0.0.1}"
+PORT="${MYEBOOKS_PORT:-8000}"
+LIBRARY_DIR="${EBOOK_LOCAL_DIR:-/Users/s.gioria/goinfre/cambook}"
+DRIVE_URL="${GOOGLE_DRIVE_PUBLIC_URL:-}"
+DATA_DIR="${EBOOK_DATA_DIR:-${PROJECT_DIR}/data}"
+RELOAD="${MYEBOOKS_RELOAD:-1}"
+KOBO_MODE="${MYEBOOKS_KOBO:-0}"
+SOURCE_MODE=local
+SOURCE_OPTION=""
+
+if [[ -n "$DRIVE_URL" ]]; then
+    SOURCE_MODE=google_public
+fi
+
+detect_lan_ip() {
+    local interface
+    local address
+
+    if command -v ipconfig >/dev/null 2>&1; then
+        for interface in en0 en1 en2 en3 en4; do
+            address="$(ipconfig getifaddr "$interface" 2>/dev/null || true)"
+            if [[ -n "$address" && "$address" != 127.* ]]; then
+                printf '%s\n' "$address"
+                return 0
+            fi
+        done
+    fi
+
+    if command -v ifconfig >/dev/null 2>&1; then
+        for interface in en0 en1 en2 en3 en4; do
+            address="$(
+                ifconfig "$interface" 2>/dev/null \
+                    | awk '$1 == "inet" && $2 !~ /^127\./ { print $2; exit }'
+            )"
+            if [[ -n "$address" ]]; then
+                printf '%s\n' "$address"
+                return 0
+            fi
+        done
+    fi
+
+    if command -v hostname >/dev/null 2>&1; then
+        address="$(hostname -I 2>/dev/null | awk '{ print $1 }' || true)"
+        if [[ -n "$address" && "$address" != 127.* ]]; then
+            printf '%s\n' "$address"
+            return 0
+        fi
+    fi
+
+    return 1
+}
+
+usage() {
+    cat <<'EOF'
+Usage: ./start_dev [options]
+
+Lance myEbooks en développement avec un dossier local ou un Drive public.
+
+Options:
+  --host ADRESSE       Adresse d'écoute (défaut : 127.0.0.1)
+  --kobo               Rend le serveur accessible sur le réseau local
+  --port PORT          Port HTTP (défaut : 8000)
+  --library DOSSIER    Dossier contenant les EPUB/PDF
+  --drive-url URL      URL HTTPS d'un dossier Google Drive public
+  --data DOSSIER       Dossier de la base SQLite et des couvertures
+  --reload             Active le rechargement automatique (défaut)
+  --no-reload          Désactive le rechargement automatique
+  -h, --help           Affiche cette aide
+
+Variables équivalentes :
+  MYEBOOKS_HOST, MYEBOOKS_PORT, EBOOK_LOCAL_DIR, GOOGLE_DRIVE_PUBLIC_URL,
+  EBOOK_DATA_DIR, MYEBOOKS_RELOAD, MYEBOOKS_KOBO et MYEBOOKS_SKIP_INSTALL.
+
+Exemple pour une Kobo sur le même réseau :
+  ./start_dev --kobo
+
+Exemple avec un Drive public et une Kobo :
+  ./start_dev --kobo --drive-url 'https://drive.google.com/drive/folders/IDENTIFIANT'
+EOF
+}
+
+require_value() {
+    if [[ $# -lt 2 || -z "${2:-}" ]]; then
+        echo "Erreur : une valeur est requise après $1" >&2
+        exit 2
+    fi
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --host)
+            require_value "$@"
+            HOST="$2"
+            shift 2
+            ;;
+        --kobo)
+            KOBO_MODE=1
+            HOST=0.0.0.0
+            shift
+            ;;
+        --port)
+            require_value "$@"
+            PORT="$2"
+            shift 2
+            ;;
+        --library)
+            require_value "$@"
+            if [[ "$SOURCE_OPTION" == "drive" ]]; then
+                echo "Erreur : --library et --drive-url ne peuvent pas être utilisés ensemble." >&2
+                exit 2
+            fi
+            LIBRARY_DIR="$2"
+            SOURCE_MODE=local
+            SOURCE_OPTION=library
+            shift 2
+            ;;
+        --drive-url)
+            require_value "$@"
+            if [[ "$SOURCE_OPTION" == "library" ]]; then
+                echo "Erreur : --library et --drive-url ne peuvent pas être utilisés ensemble." >&2
+                exit 2
+            fi
+            DRIVE_URL="$2"
+            SOURCE_MODE=google_public
+            SOURCE_OPTION=drive
+            shift 2
+            ;;
+        --data)
+            require_value "$@"
+            DATA_DIR="$2"
+            shift 2
+            ;;
+        --reload)
+            RELOAD=1
+            shift
+            ;;
+        --no-reload)
+            RELOAD=0
+            shift
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            echo "Erreur : option inconnue : $1" >&2
+            usage >&2
+            exit 2
+            ;;
+    esac
+done
+
+if [[ ! "$PORT" =~ ^[0-9]+$ ]] || ((PORT < 1 || PORT > 65535)); then
+    echo "Erreur : le port doit être un entier compris entre 1 et 65535." >&2
+    exit 2
+fi
+
+if [[ "$SOURCE_MODE" == "local" ]]; then
+    if [[ ! -d "$LIBRARY_DIR" || ! -r "$LIBRARY_DIR" ]]; then
+        echo "Erreur : le dossier d'ebooks n'est pas lisible : $LIBRARY_DIR" >&2
+        exit 1
+    fi
+elif [[ ! "$DRIVE_URL" =~ ^https://drive\.google\.com/drive/folders/[A-Za-z0-9_-]{20,}([/?].*)?$ ]]; then
+    echo "Erreur : --drive-url doit être une URL HTTPS de dossier drive.google.com." >&2
+    exit 2
+fi
+
+VENV_DIR="${PROJECT_DIR}/.venv"
+PYTHON="${VENV_DIR}/bin/python"
+INSTALL_STAMP="${VENV_DIR}/.myebooks-dev-installed"
+
+if [[ ! -x "$PYTHON" ]]; then
+    if ! command -v python3 >/dev/null 2>&1; then
+        echo "Erreur : Python 3 est introuvable." >&2
+        exit 1
+    fi
+    echo "Création de l'environnement Python dans ${VENV_DIR}…"
+    python3 -m venv "$VENV_DIR"
+fi
+
+needs_install=0
+if [[ ! -f "$INSTALL_STAMP" ]]; then
+    if ! "$PYTHON" -c "import ebooklib, fastapi, gdown, myebooks, pymupdf, uvicorn" \
+        >/dev/null 2>&1; then
+        needs_install=1
+    fi
+elif [[ "${PROJECT_DIR}/pyproject.toml" -nt "$INSTALL_STAMP" ]]; then
+    needs_install=1
+fi
+
+if [[ "${MYEBOOKS_SKIP_INSTALL:-0}" != "1" && "$needs_install" == "1" ]]; then
+    echo "Installation des dépendances de développement…"
+    "$PYTHON" -m pip install --disable-pip-version-check -e "${PROJECT_DIR}[dev]"
+fi
+
+if [[ "${MYEBOOKS_SKIP_INSTALL:-0}" != "1" ]]; then
+    touch "$INSTALL_STAMP"
+fi
+
+export EBOOK_DATA_DIR="$DATA_DIR"
+if [[ "$SOURCE_MODE" == "google_public" ]]; then
+    export EBOOK_SOURCE=google_public
+    export GOOGLE_DRIVE_PUBLIC_URL="$DRIVE_URL"
+    unset EBOOK_LOCAL_DIR
+else
+    export EBOOK_SOURCE=local
+    export EBOOK_LOCAL_DIR="$LIBRARY_DIR"
+    unset GOOGLE_DRIVE_PUBLIC_URL
+fi
+
+command=(
+    "$PYTHON" -m uvicorn myebooks.main:app
+    --host "$HOST"
+    --port "$PORT"
+)
+
+if [[ "$RELOAD" == "1" ]]; then
+    command+=(--reload --reload-dir "${PROJECT_DIR}/src")
+fi
+
+echo
+echo "myEbooks démarre avec :"
+if [[ "$SOURCE_MODE" == "google_public" ]]; then
+    echo "  Source        : Google Drive public"
+    echo "  Drive         : $GOOGLE_DRIVE_PUBLIC_URL"
+else
+    echo "  Source        : dossier local"
+    echo "  Bibliothèque  : $EBOOK_LOCAL_DIR"
+fi
+echo "  Données      : $EBOOK_DATA_DIR"
+if [[ "$KOBO_MODE" == "1" || "$HOST" == "0.0.0.0" ]]; then
+    LAN_IP="$(detect_lan_ip || true)"
+    echo "  Écoute réseau : http://0.0.0.0:${PORT}"
+    if [[ -n "$LAN_IP" ]]; then
+        echo "  Adresse Kobo  : http://${LAN_IP}:${PORT}/kobo"
+        echo "  Administration: http://${LAN_IP}:${PORT}/pandaIndexKobo"
+    else
+        echo "  Adresse Kobo  : IP locale non détectée ; consultez la sortie de ifconfig."
+    fi
+    echo
+    echo "La Kobo doit être connectée au même Wi-Fi."
+    echo "Si macOS le demande, autorisez Python à accepter les connexions entrantes."
+else
+    echo "  Adresse       : http://${HOST}:${PORT}"
+    echo "  Administration: http://${HOST}:${PORT}/pandaIndexKobo"
+fi
+echo
+echo "Arrêt : Ctrl+C"
+echo
+
+cd "$PROJECT_DIR"
+exec "${command[@]}"

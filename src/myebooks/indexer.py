@@ -10,7 +10,7 @@ from .database import LibraryDatabase
 from .domain import EbookSource, ExtractedBook, IndexResult
 from .extractors import extract_book
 
-LOGGER = logging.getLogger(__name__)
+LOGGER = logging.getLogger("uvicorn.error.myebooks.indexer")
 ALLOWED_COVER_EXTENSIONS = {"jpg", "png", "gif", "webp"}
 
 
@@ -51,9 +51,33 @@ class LibraryIndexer:
 
         sync_id = self.database.start_sync()
         try:
+            LOGGER.info("Indexation démarrée : recensement des livres de la source…")
             remote_files = self.source.list_files()
             present_ids = {remote_file.id for remote_file in remote_files}
             indexed = unchanged = failed = 0
+            total = len(remote_files)
+
+            def report_progress() -> None:
+                result = IndexResult(
+                    discovered=total,
+                    indexed=indexed,
+                    unchanged=unchanged,
+                    failed=failed,
+                )
+                self.database.update_sync_progress(sync_id, result)
+                processed = indexed + unchanged + failed
+                if processed == 0 or processed == total or processed % 10 == 0:
+                    LOGGER.info(
+                        "Indexation : %d livre(s) traité(s) sur %d "
+                        "(%d indexé(s), %d inchangé(s), %d en erreur)",
+                        processed,
+                        total,
+                        indexed,
+                        unchanged,
+                        failed,
+                    )
+
+            report_progress()
 
             for remote_file in remote_files:
                 if (
@@ -61,6 +85,7 @@ class LibraryIndexer:
                     and self.database.fingerprint_for(remote_file.id) == remote_file.fingerprint
                 ):
                     unchanged += 1
+                    report_progress()
                     continue
                 previous_cover = self.database.cover_for(remote_file.id)
                 try:
@@ -85,6 +110,7 @@ class LibraryIndexer:
                         remote_file, fallback, previous_cover, parse_error=str(exc)[:500]
                     )
                     failed += 1
+                report_progress()
 
             removed, missing_covers = self.database.mark_missing(present_ids)
             for filename in missing_covers:

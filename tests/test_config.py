@@ -36,13 +36,13 @@ def test_public_google_source_accepts_drive_folder_url(monkeypatch, tmp_path):
     monkeypatch.setenv("EBOOK_DATA_DIR", str(tmp_path))
     monkeypatch.setenv(
         "GOOGLE_DRIVE_PUBLIC_URL",
-        "https://drive.google.com/drive/folders/1AbCdEfGhIjKlMnOpQrStUvWx",
+        "https://drive.google.com/drive/folders/1AbCdEfGhIjKlMnOpQrStUvWx?usp=sharing",
     )
 
     settings = Settings.from_env()
 
     assert settings.source == "google_public"
-    assert settings.google_drive_public_url.endswith("1AbCdEfGhIjKlMnOpQrStUvWx")
+    assert settings.google_drive_public_url.endswith("1AbCdEfGhIjKlMnOpQrStUvWx?usp=sharing")
 
 
 @pytest.mark.parametrize(
@@ -58,4 +58,24 @@ def test_public_google_source_rejects_unsafe_or_non_folder_url(monkeypatch, url)
     monkeypatch.setenv("GOOGLE_DRIVE_PUBLIC_URL", url)
 
     with pytest.raises(ValueError, match="GOOGLE_DRIVE_PUBLIC_URL"):
+        Settings.from_env()
+
+
+def test_local_source_accepts_existing_directory(monkeypatch, tmp_path):
+    library = tmp_path / "ebooks"
+    library.mkdir()
+    monkeypatch.setenv("EBOOK_SOURCE", "local")
+    monkeypatch.setenv("EBOOK_LOCAL_DIR", str(library))
+
+    settings = Settings.from_env()
+
+    assert settings.source == "local"
+    assert settings.local_library_dir == library
+
+
+def test_local_source_requires_existing_directory(monkeypatch, tmp_path):
+    monkeypatch.setenv("EBOOK_SOURCE", "local")
+    monkeypatch.setenv("EBOOK_LOCAL_DIR", str(tmp_path / "missing"))
+
+    with pytest.raises(ValueError, match="EBOOK_LOCAL_DIR"):
         Settings.from_env()

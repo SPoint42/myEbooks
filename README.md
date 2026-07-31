@@ -10,7 +10,7 @@ résultat dans SQLite pour ne pas reparcourir les fichiers inchangés.
 
 ## Fonctionnalités du MVP
 
-- galerie Web responsive, recherche serveur par titre, auteur ou ISBN ;
+- galerie Web responsive, recherche, filtre par auteur et pagination de 10 livres par page ;
 - extraction des métadonnées Dublin Core et de la couverture des EPUB ;
 - extraction des métadonnées, de l’ISBN textuel et rendu de la première page des PDF ;
 - indexation à la demande, incrémentale par checksum ou date de modification ;
@@ -33,7 +33,8 @@ python -m pip install -e '.[dev]'
 EBOOK_SOURCE=fake uvicorn myebooks.main:app --reload
 ```
 
-Ouvrez <http://127.0.0.1:8000>, puis cliquez sur **Indexer le Drive**. Deux livres de
+Ouvrez <http://127.0.0.1:8000/pandaIndexKobo>, puis cliquez sur **Indexer la bibliothèque**.
+La bibliothèque publique reste accessible sur <http://127.0.0.1:8000>. Deux livres de
 démonstration apparaissent. Ils ont été générés puis analysés par les mêmes extracteurs que
 les fichiers réels.
 
@@ -41,6 +42,46 @@ Avec Docker :
 
 ```bash
 docker compose up --build
+```
+
+## Tester avec un dossier local
+
+Le mode `local` lit récursivement un dossier en lecture seule. Les PDF et EPUB restent à leur
+emplacement d’origine ; seules les métadonnées et les couvertures sont enregistrées dans le
+répertoire de données de l’application.
+
+Pour utiliser la bibliothèque de test `cambook` sur cette machine :
+
+```bash
+cd /Users/s.gioria/perso/github.com/SPoint42/myEbooks
+./start_dev
+```
+
+Le lanceur racine délègue à [`scripts/start_dev`](scripts/start_dev), où sont regroupés les
+scripts du projet. Il crée `.venv` si nécessaire, installe les dépendances lors du premier
+lancement ou après une modification de `pyproject.toml`, puis utilise par défaut
+`/Users/s.gioria/goinfre/cambook`.
+
+Ouvrez <http://127.0.0.1:8000/pandaIndexKobo> pour lancer l’indexation. La bibliothèque publique
+reste accessible sur <http://127.0.0.1:8000>. Dans ce mode, seuls les fichiers du dossier local
+configuré sont analysés.
+
+Pour ouvrir également l’application depuis une Kobo connectée au même Wi-Fi, lancez :
+
+```bash
+./start_dev --kobo
+```
+
+Le script écoute alors sur le réseau local, détecte l’adresse IP du Mac et affiche directement
+l’URL `http://ADRESSE_IP:8000/kobo` à saisir dans le navigateur de la liseuse. Cette page dédiée
+utilise des boutons de formulaire pointant vers des URL terminant par `.epub` ou `.pdf`, du HTML
+simple et aucun JavaScript.
+Si macOS affiche une demande de pare-feu, autorisez Python à accepter les connexions entrantes.
+
+Les options disponibles sont affichées avec `./start_dev --help`. Par exemple :
+
+```bash
+./start_dev --library /autre/dossier --port 8080 --no-reload
 ```
 
 ## Connexion par un lien Google Drive public
@@ -52,10 +93,15 @@ propriétaire.
 Copiez simplement l’URL du dossier puis lancez l’application :
 
 ```bash
-export EBOOK_SOURCE=google_public
-export GOOGLE_DRIVE_PUBLIC_URL='https://drive.google.com/drive/folders/1AbCDEF_identifiant'
-uvicorn myebooks.main:app --host 0.0.0.0 --port 8000
+./start_dev --kobo \
+  --drive-url 'https://drive.google.com/drive/folders/1AbCdEfGhIjKlMnOpQrStUvWx'
 ```
+
+`--drive-url` sélectionne automatiquement la source `google_public`. Pour une utilisation sans
+Kobo, retirez simplement l’option `--kobo` et ouvrez <http://127.0.0.1:8000>.
+
+La commande et sa progression sont regroupées sur la page non liée `/pandaIndexKobo`. Aucun
+bouton ni état d’indexation n’apparaît dans les bibliothèques `/` et `/kobo`.
 
 Ce mode parcourt récursivement le dossier public avec `gdown`. Il ne nécessite ni compte de
 service, ni clé Google Cloud. Le listing public ne fournit toutefois pas la date de

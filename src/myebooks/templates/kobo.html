@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>myEbooks pour Kobo</title>
+  <style type="text/css">
+    body { background: #fff; color: #000; font-family: sans-serif; margin: 12px; }
+    a { color: #000; }
+    .action { background: #fff; border: 2px solid #000; display: block; font-size: 18px; margin: 12px 0; padding: 14px; width: 100%; }
+    .book { border-top: 1px solid #777; clear: both; padding: 18px 0; }
+    .cover { float: left; margin: 0 14px 14px 0; max-height: 180px; width: 120px; }
+    .clear { clear: both; }
+    input, select { font-size: 16px; padding: 8px; }
+  </style>
+</head>
+<body>
+  <h1>myEbooks</h1>
+  <p>Version simplifiée pour le navigateur Kobo.</p>
+
+  <form action="/kobo" method="get">
+    {% if query %}<input type="hidden" name="q" value="{{ query }}">{% endif %}
+    <label for="kobo-author">Auteur :</label>
+    <select id="kobo-author" name="author">
+      <option value="">Tous les auteurs</option>
+      {% for author in authors %}
+        <option value="{{ author }}"{% if author == selected_author %} selected{% endif %}>{{ author }}</option>
+      {% endfor %}
+    </select>
+    <input type="submit" value="Afficher">
+  </form>
+
+  <form action="/kobo" method="get">
+    {% if selected_author %}<input type="hidden" name="author" value="{{ selected_author }}">{% endif %}
+    <label for="kobo-search">Recherche :</label>
+    <input id="kobo-search" type="text" name="q" value="{{ query }}">
+    <input type="submit" value="Rechercher">
+  </form>
+
+  <p><strong>{{ result_count }} livre(s)</strong>{% if result_count %} — page {{ page }} sur {{ total_pages }}{% endif %}</p>
+
+  {% for book in books %}
+    <div class="book">
+      {% set download_url = kobo_download_paths[book.id] %}
+      {% if book.cover_filename %}
+        <img class="cover" src="/kobo/covers/{{ book.id }}.png" alt="Couverture">
+      {% endif %}
+      <h2>{{ book.title }}</h2>
+      <p>{{ book.author or 'Auteur non renseigne' }}{% if book.publication_year %} — {{ book.publication_year }}{% endif %}</p>
+      {% if book.isbn %}<p>ISBN {{ book.isbn }}</p>{% endif %}
+      <form action="{{ download_url }}" method="get">
+        <input class="action" type="submit" value="TELECHARGER {{ book.file_format|upper }}">
+      </form>
+      <div class="clear"></div>
+    </div>
+  {% else %}
+    <p>Aucun livre disponible.</p>
+  {% endfor %}
+
+  {% if total_pages > 1 %}
+    <hr>
+    <p><strong>Page {{ page }} sur {{ total_pages }}</strong></p>
+    {% if has_previous_page %}
+      <form action="/kobo" method="get">
+        {% if query %}<input type="hidden" name="q" value="{{ query }}">{% endif %}
+        {% if selected_author %}<input type="hidden" name="author" value="{{ selected_author }}">{% endif %}
+        <input type="hidden" name="page" value="{{ previous_page }}">
+        <input class="action" type="submit" value="PAGE PRECEDENTE">
+      </form>
+    {% endif %}
+    {% if has_next_page %}
+      <form action="/kobo" method="get">
+        {% if query %}<input type="hidden" name="q" value="{{ query }}">{% endif %}
+        {% if selected_author %}<input type="hidden" name="author" value="{{ selected_author }}">{% endif %}
+        <input type="hidden" name="page" value="{{ next_page }}">
+        <input class="action" type="submit" value="PAGE SUIVANTE">
+      </form>
+    {% endif %}
+  {% endif %}
+
+  <p><a href="/kobo" target="_self">Actualiser la page</a></p>
+</body>
+</html>

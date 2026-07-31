@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from myebooks.database import LibraryDatabase
 from myebooks.demo import FakeDriveSource
 from myebooks.indexer import LibraryIndexer
@@ -50,3 +52,14 @@ def test_force_reindexes_unchanged_files(settings):
 
     assert result.indexed == 2
     assert result.unchanged == 0
+
+
+def test_index_reports_progress_in_logs(settings, caplog):
+    indexer, _database, _source = make_indexer(settings)
+    caplog.set_level(logging.INFO, logger="uvicorn.error.myebooks.indexer")
+
+    indexer.run()
+
+    assert "recensement des livres" in caplog.text
+    assert "0 livre(s) traité(s) sur 2" in caplog.text
+    assert "2 livre(s) traité(s) sur 2" in caplog.text
