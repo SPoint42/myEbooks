@@ -73,6 +73,29 @@ def test_catalog_archive_can_be_verified_and_installed(settings, tmp_path):
     assert len(list((installed / "covers").iterdir())) == 1
 
 
+def test_empty_catalog_archive_installs_an_empty_covers_directory(settings, tmp_path):
+    source = FakeDriveSource()
+    source._files.clear()
+    artifact = build_catalog_artifact(
+        settings,
+        source,
+        output_dir=tmp_path / "dist",
+        staged_catalog=tmp_path / "first" / "catalog",
+    )
+    installed = tmp_path / "second" / "catalog"
+
+    install_catalog_archive(
+        artifact.archive_path,
+        artifact.checksum_path,
+        staged_catalog=installed,
+    )
+
+    assert artifact.book_count == 0
+    assert artifact.cover_count == 0
+    assert (installed / "covers").is_dir()
+    assert not any((installed / "covers").iterdir())
+
+
 def test_catalog_install_rejects_path_traversal(tmp_path):
     archive_path = tmp_path / "myebooks-catalog-unsafe.tar.gz"
     with tarfile.open(archive_path, "w:gz") as archive:

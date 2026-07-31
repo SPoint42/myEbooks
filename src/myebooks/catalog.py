@@ -306,5 +306,6 @@ def install_catalog_archive(
         if manifest.get("database_sha256") != _sha256(extracted / "myebooks.sqlite3"):
             raise ValueError("Le checksum de la base SQLite ne correspond pas au manifeste")
         LibraryDatabase(extracted / "myebooks.sqlite3", read_only=True).validate_catalog()
+        (extracted / "covers").mkdir(exist_ok=True)
         (extracted / ".gitkeep").touch()
         _replace_directory(extracted, staged_catalog)
