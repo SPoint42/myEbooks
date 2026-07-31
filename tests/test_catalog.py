@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from myebooks.catalog import build_catalog_artifact, install_catalog_archive
+from myebooks.catalog import build_catalog_artifact, index_library, install_catalog_archive
 from myebooks.database import LibraryDatabase
 from myebooks.demo import FakeDriveSource
 
@@ -96,6 +96,48 @@ def test_empty_catalog_archive_installs_an_empty_covers_directory(settings, tmp_
     assert not any((installed / "covers").iterdir())
 
 
+def test_catalog_artifact_can_reuse_existing_data_without_a_source(settings, tmp_path):
+    index_library(settings, FakeDriveSource())
+
+    artifact = build_catalog_artifact(
+        settings,
+        None,
+        output_dir=tmp_path / "dist",
+        staged_catalog=tmp_path / "deploy" / "catalog",
+        skip_index=True,
+    )
+
+    manifest = json.loads((artifact.staged_catalog / "manifest.json").read_text())
+    assert artifact.book_count == 1
+    assert artifact.cover_count == 1
+    assert artifact.result.indexed == 1
+    assert manifest["source"] == "Cache local existant"
+
+
+def test_reusing_existing_data_stops_an_indexation_in_progress(
+    settings, tmp_path, monkeypatch
+):
+    database = LibraryDatabase(settings.database_path)
+    database.initialize()
+    sync_id = database.start_sync()
+
+    def stop_index(_settings, requested_sync_id):
+        assert requested_sync_id == sync_id
+        database.fail_sync(sync_id, "Arrêt demandé par le test")
+
+    monkeypatch.setattr("myebooks.catalog.request_index_cancellation", stop_index)
+    artifact = build_catalog_artifact(
+        settings,
+        None,
+        output_dir=tmp_path / "dist",
+        staged_catalog=tmp_path / "deploy" / "catalog",
+        skip_index=True,
+    )
+
+    assert artifact.book_count == 0
+    assert database.latest_sync()["status"] == "failed"
+
+
 def test_catalog_install_rejects_path_traversal(tmp_path):
     archive_path = tmp_path / "myebooks-catalog-unsafe.tar.gz"
     with tarfile.open(archive_path, "w:gz") as archive:
@@ -140,6 +182,21 @@ def test_catalog_scripts_are_executable_and_document_their_actions():
     assert "génère l'artefact SQLite" in result.stdout
     assert "--drive-url" in result.stdout
     assert "--publish" in result.stdout
+    assert "--skip-index" in result.stdout
+
+    incompatible = subprocess.run(
+        [
+            str(PROJECT_DIR / "scripts" / "build_catalog"),
+            "--skip-index",
+            "--fake",
+        ],
+        cwd=PROJECT_DIR,
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    assert incompatible.returncode == 2
+    assert "ne peut pas être combiné" in incompatible.stderr
 
     image_help = subprocess.run(
         [str(PROJECT_DIR / "scripts" / "build_scaleway_image"), "--help"],

@@ -85,6 +85,11 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Publie l'archive comme GitHub Release avec gh",
     )
+    build_parser.add_argument(
+        "--skip-index",
+        action="store_true",
+        help="Publie uniquement le cache --data existant, sans contacter la source",
+    )
 
     install_parser = commands.add_parser(
         "install", help="Télécharge et vérifie un artefact GitHub avant le build Docker"
@@ -133,9 +138,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Catalogue {arguments.tag} installé dans deploy/catalog")
         return 0
 
-    settings = _settings_from_arguments(arguments)
-    source = create_source(settings)
     if arguments.command == "index":
+        settings = _settings_from_arguments(arguments)
+        source = create_source(settings)
         result = index_library(settings, source, force=arguments.force)
         print(
             f"Indexation terminée : {result.indexed} indexé(s), "
@@ -144,6 +149,17 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 0
 
+    if arguments.skip_index:
+        if arguments.drive_url or arguments.library or arguments.fake or arguments.force:
+            parser.error(
+                "--skip-index ne peut pas être combiné avec une source ou --force ; "
+                "utilisez seulement --data et éventuellement --output."
+            )
+        settings = Settings(data_dir=arguments.data.expanduser().resolve())
+        source = None
+    else:
+        settings = _settings_from_arguments(arguments)
+        source = create_source(settings)
 
     artifact = build_catalog_artifact(
         settings,
@@ -151,6 +167,7 @@ def main(argv: list[str] | None = None) -> int:
         output_dir=arguments.output.expanduser().resolve(),
         staged_catalog=PROJECT_DIR / "deploy" / "catalog",
         force=arguments.force,
+        skip_index=arguments.skip_index,
     )
     print(f"Catalogue généré : {artifact.archive_path}")
     print(f"Checksum SHA-256 : {artifact.checksum_path}")

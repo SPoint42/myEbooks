@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import re
 import shutil
@@ -9,6 +10,7 @@ import sqlite3
 import subprocess
 import tarfile
 import tempfile
+import time
 from contextlib import closing
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
@@ -17,7 +19,7 @@ from pathlib import Path, PurePosixPath
 from .config import Settings
 from .database import LibraryDatabase
 from .domain import EbookSource, IndexResult
-from .indexer import ALLOWED_COVER_EXTENSIONS, LibraryIndexer
+from .indexer import ALLOWED_COVER_EXTENSIONS, LibraryIndexer, request_index_cancellation
 from .sources import source_label
 
 CATALOG_SCHEMA_VERSION = 1
@@ -27,6 +29,9 @@ CATALOG_TAG = re.compile(r"^catalog-\d{8}T\d{6}Z$")
 CHECKSUM_LINE = re.compile(r"^([0-9a-f]{64})  ([A-Za-z0-9._-]+)$")
 COVER_FILENAME = re.compile(r"^[0-9a-f]{64}\.(?:gif|jpg|png|webp)$")
 GIT_COMMIT = re.compile(r"^[0-9a-f]{40,64}$")
+INDEX_STOP_TIMEOUT = 300
+INDEX_STOP_POLL_INTERVAL = 0.25
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,16 +130,62 @@ def _write_archive(catalog_dir: Path, archive_path: Path) -> None:
     os.replace(temporary_archive, archive_path)
 
 
+def _stop_running_index(settings: Settings) -> None:
+    database = LibraryDatabase(settings.database_path, read_only=True)
+    latest_sync = database.latest_sync()
+    if latest_sync is None or latest_sync["status"] != "running":
+        return
+
+    sync_id = int(latest_sync["id"])
+    LOGGER.info(
+        "Indexation active détectée (exécution %d) : demande d'arrêt propre…",
+        sync_id,
+    )
+    request_index_cancellation(settings, sync_id)
+    deadline = time.monotonic() + INDEX_STOP_TIMEOUT
+    while time.monotonic() < deadline:
+        current_sync = database.latest_sync()
+        if (
+            current_sync is None
+            or int(current_sync["id"]) != sync_id
+            or current_sync["status"] != "running"
+        ):
+            LOGGER.info("Indexation arrêtée ; création du catalogue avec les données acquises.")
+            return
+        time.sleep(INDEX_STOP_POLL_INTERVAL)
+    raise RuntimeError(
+        "L'indexation n'a pas répondu à la demande d'arrêt après "
+        f"{INDEX_STOP_TIMEOUT} secondes ; publication annulée."
+    )
+
+
 def build_catalog_artifact(
     settings: Settings,
-    source: EbookSource,
+    source: EbookSource | None,
     *,
     output_dir: Path,
     staged_catalog: Path,
     force: bool = False,
+    skip_index: bool = False,
     generated_at: datetime | None = None,
 ) -> CatalogArtifact:
-    result = index_library(settings, source, force=force)
+    if skip_index:
+        database = LibraryDatabase(settings.database_path, read_only=True)
+        database.validate_catalog()
+        _stop_running_index(settings)
+        latest_sync = database.latest_sync()
+        result = IndexResult(
+            **{
+                field: int(latest_sync.get(field, 0)) if latest_sync else 0
+                for field in ("discovered", "indexed", "unchanged", "failed", "removed")
+            }
+        )
+        catalog_source = "Cache local existant"
+    else:
+        if source is None:
+            raise ValueError("Une source est requise lorsque l'indexation n'est pas ignorée")
+        result = index_library(settings, source, force=force)
+        catalog_source = source_label(settings)
     generated_at = generated_at or datetime.now(UTC)
     version = generated_at.strftime("%Y%m%dT%H%M%SZ")
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -155,7 +206,7 @@ def build_catalog_artifact(
             "schema_version": CATALOG_SCHEMA_VERSION,
             "version": version,
             "generated_at": generated_at.isoformat(),
-            "source": source_label(settings),
+            "source": catalog_source,
             "book_count": book_count,
             "cover_count": cover_count,
             "database_sha256": database_hash,

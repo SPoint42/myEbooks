@@ -4,7 +4,11 @@ import logging
 
 from myebooks.database import LibraryDatabase
 from myebooks.demo import FakeDriveSource
-from myebooks.indexer import LibraryIndexer
+from myebooks.indexer import (
+    LibraryIndexer,
+    index_cancellation_path,
+    request_index_cancellation,
+)
 
 
 def make_indexer(settings):
@@ -63,3 +67,25 @@ def test_index_reports_progress_in_logs(settings, caplog):
     assert "recensement des livres" in caplog.text
     assert "0 livre(s) traité(s) sur 1" in caplog.text
     assert "1 livre(s) traité(s) sur 1" in caplog.text
+
+
+def test_index_stops_cleanly_when_catalog_publication_requests_it(settings):
+    indexer, database, source = make_indexer(settings)
+    source._files["second-epub"] = source._files["demo-epub"]
+    original_download = source.download
+
+    def download_and_request_stop(remote_file):
+        content = original_download(remote_file)
+        if remote_file.id == "demo-epub":
+            request_index_cancellation(settings, int(database.latest_sync()["id"]))
+        return content
+
+    source.download = download_and_request_stop
+
+    result = indexer.run()
+
+    assert result.discovered == 2
+    assert result.indexed == 1
+    assert len(database.list_books()) == 1
+    assert database.latest_sync()["status"] == "failed"
+    assert not index_cancellation_path(settings).exists()

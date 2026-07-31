@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
+import tempfile
 import threading
 from pathlib import Path
 
@@ -12,6 +14,7 @@ from .extractors import extract_book
 
 LOGGER = logging.getLogger("uvicorn.error.myebooks.indexer")
 ALLOWED_COVER_EXTENSIONS = {"jpg", "png", "gif", "webp"}
+INDEX_CANCELLATION_FILENAME = ".myebooks-index-cancel"
 
 
 def _is_epub(remote_file: RemoteFile) -> bool:
@@ -23,6 +26,45 @@ def _is_epub(remote_file: RemoteFile) -> bool:
 
 class IndexAlreadyRunning(RuntimeError):
     pass
+
+
+class IndexCancelled(RuntimeError):
+    pass
+
+
+def index_cancellation_path(settings: Settings) -> Path:
+    return settings.data_dir / INDEX_CANCELLATION_FILENAME
+
+
+def request_index_cancellation(settings: Settings, sync_id: int) -> None:
+    settings.data_dir.mkdir(parents=True, exist_ok=True)
+    file_descriptor, temporary_name = tempfile.mkstemp(
+        prefix=".myebooks-index-cancel-",
+        dir=settings.data_dir,
+        text=True,
+    )
+    temporary_path = Path(temporary_name)
+    try:
+        with os.fdopen(file_descriptor, "w", encoding="ascii") as stream:
+            stream.write(f"{sync_id}\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary_path, index_cancellation_path(settings))
+    finally:
+        temporary_path.unlink(missing_ok=True)
+
+
+def _cancellation_requested(settings: Settings, sync_id: int) -> bool:
+    try:
+        requested_sync = index_cancellation_path(settings).read_text(encoding="ascii").strip()
+    except FileNotFoundError:
+        return False
+    return requested_sync == str(sync_id)
+
+
+def _clear_cancellation(settings: Settings, sync_id: int) -> None:
+    if _cancellation_requested(settings, sync_id):
+        index_cancellation_path(settings).unlink(missing_ok=True)
 
 
 class LibraryIndexer:
@@ -68,6 +110,10 @@ class LibraryIndexer:
             indexed = unchanged = failed = 0
             total = len(remote_files)
 
+            def stop_if_requested() -> None:
+                if _cancellation_requested(self.settings, sync_id):
+                    raise IndexCancelled("Arrêt demandé avant la publication du catalogue")
+
             def report_progress() -> None:
                 result = IndexResult(
                     discovered=total,
@@ -89,8 +135,10 @@ class LibraryIndexer:
                     )
 
             report_progress()
+            stop_if_requested()
 
             for remote_file in remote_files:
+                stop_if_requested()
                 if (
                     not force
                     and self.database.fingerprint_for(remote_file.id) == remote_file.fingerprint
@@ -123,6 +171,7 @@ class LibraryIndexer:
                     failed += 1
                 report_progress()
 
+            stop_if_requested()
             removed, missing_covers = self.database.mark_missing(present_ids)
             for filename in missing_covers:
                 self._remove_cover(filename)
@@ -135,8 +184,23 @@ class LibraryIndexer:
             )
             self.database.finish_sync(sync_id, result)
             return result
+        except IndexCancelled as exc:
+            result = IndexResult(
+                discovered=total,
+                indexed=indexed,
+                unchanged=unchanged,
+                failed=failed,
+            )
+            self.database.fail_sync(sync_id, str(exc))
+            LOGGER.info(
+                "Indexation arrêtée proprement : %d livre(s) traité(s) sur %d",
+                indexed + unchanged + failed,
+                total,
+            )
+            return result
         except Exception as exc:
             self.database.fail_sync(sync_id, str(exc))
             raise
         finally:
+            _clear_cancellation(self.settings, sync_id)
             self._lock.release()

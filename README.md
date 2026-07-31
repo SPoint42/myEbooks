@@ -120,6 +120,17 @@ commités. Le script crée une GitHub Release préliminaire nommée
 `catalog-YYYYMMDDTHHMMSSZ`, contenant l’archive et son SHA-256. La publication est explicite :
 `index_catalog` et `build_catalog` ne contactent jamais GitHub.
 
+Si `./data` a déjà été complètement indexé, publier son état exact sans relire le Drive :
+
+```bash
+./scripts/publish_catalog --skip-index --data ./data
+```
+
+Ce mode n’accepte ni option de source ni `--force` et ne contacte aucun connecteur. Si une
+indexation est active, il lui demande de s’arrêter proprement, attend la fin du livre en cours,
+puis publie les données déjà acquises. Il contrôle ensuite l’intégrité de la base et la présence
+de toutes les vignettes référencées.
+
 Depuis un checkout propre, l’artefact peut être récupéré et contrôlé avec :
 
 ```bash
@@ -209,7 +220,8 @@ Le workflow demande l’accès à l’environnement `prod` uniquement après avo
 testé le commit associé et vérifié l’archive. Son résumé fournit l’URL Scaleway finale. Tester
 également `URL/health`, puis ouvrir cette URL dans le navigateur de la Kobo.
 
-Pour publier une mise à jour, relancer `publish_catalog`, puis déployer le nouveau tag. Les
+Pour publier une mise à jour déjà indexée dans `./data`, lancer
+`./scripts/publish_catalog --skip-index --data ./data`, puis déployer le nouveau tag. Les
 anciens tags d’image peuvent être supprimés périodiquement du Container Registry afin de limiter
 le stockage facturé.
 
