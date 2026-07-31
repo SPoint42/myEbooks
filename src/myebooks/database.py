@@ -71,6 +71,19 @@ class LibraryDatabase:
             ).fetchall()
         return [Book(**dict(row)) for row in rows]
 
+    def book_by_id(self, book_id: int) -> Book | None:
+        with closing(self.connect()) as connection:
+            row = connection.execute(
+                """
+                SELECT id, source_id, source_name, file_format, title, author,
+                       publication_year, isbn, cover_filename, parse_error, indexed_at
+                FROM books
+                WHERE id = ? AND available = 1
+                """,
+                (book_id,),
+            ).fetchone()
+        return Book(**dict(row)) if row else None
+
     def fingerprint_for(self, source_id: str) -> str | None:
         with closing(self.connect()) as connection:
             row = connection.execute(

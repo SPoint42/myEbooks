@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlparse
 
 
 def _positive_int(name: str, default: int) -> int:
@@ -23,6 +24,7 @@ class Settings:
     google_service_account_file: Path | None = None
     google_drive_id: str | None = None
     google_drive_folder_id: str | None = None
+    google_drive_public_url: str | None = None
     max_file_size: int = 150 * 1024 * 1024
     max_epub_expanded_size: int = 300 * 1024 * 1024
     max_epub_entries: int = 10_000
@@ -38,8 +40,8 @@ class Settings:
     @classmethod
     def from_env(cls) -> Settings:
         source = os.getenv("EBOOK_SOURCE", "fake").strip().lower()
-        if source not in {"fake", "google"}:
-            raise ValueError("EBOOK_SOURCE doit valoir 'fake' ou 'google'")
+        if source not in {"fake", "google", "google_public"}:
+            raise ValueError("EBOOK_SOURCE doit valoir 'fake', 'google' ou 'google_public'")
 
         credentials = os.getenv("GOOGLE_SERVICE_ACCOUNT_FILE")
         settings = cls(
@@ -50,6 +52,7 @@ class Settings:
             ),
             google_drive_id=os.getenv("GOOGLE_DRIVE_ID") or None,
             google_drive_folder_id=os.getenv("GOOGLE_DRIVE_FOLDER_ID") or None,
+            google_drive_public_url=os.getenv("GOOGLE_DRIVE_PUBLIC_URL") or None,
             max_file_size=_positive_int("EBOOK_MAX_FILE_SIZE", 150 * 1024 * 1024),
             max_epub_expanded_size=_positive_int(
                 "EBOOK_MAX_EPUB_EXPANDED_SIZE", 300 * 1024 * 1024
@@ -60,6 +63,17 @@ class Settings:
         return settings
 
     def validate(self) -> None:
+        if self.source == "google_public":
+            if not self.google_drive_public_url:
+                raise ValueError(
+                    "GOOGLE_DRIVE_PUBLIC_URL est requis avec EBOOK_SOURCE=google_public"
+                )
+            parsed = urlparse(self.google_drive_public_url)
+            if parsed.scheme != "https" or parsed.hostname != "drive.google.com":
+                raise ValueError("GOOGLE_DRIVE_PUBLIC_URL doit être une URL HTTPS drive.google.com")
+            if "/folders/" not in parsed.path:
+                raise ValueError("GOOGLE_DRIVE_PUBLIC_URL doit pointer vers un dossier Drive")
+            return
         if self.source != "google":
             return
         if not self.google_service_account_file:

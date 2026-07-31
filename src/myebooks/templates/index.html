@@ -6,7 +6,6 @@
     <meta name="description" content="Votre bibliothèque PDF et EPUB indexée depuis Google Drive.">
     <title>myEbooks — Ma bibliothèque</title>
     <link rel="stylesheet" href="{{ url_for('static', path='/app.css') }}">
-    <script src="{{ url_for('static', path='/app.js') }}" defer></script>
   </head>
   <body>
     <header class="site-header">
@@ -38,11 +37,11 @@
       </section>
 
       {% if sync %}
-      <section class="sync-status {{ sync.status }}" data-sync-status data-status="{{ sync.status }}" aria-live="polite">
+      <section class="sync-status {{ sync.status }}" aria-live="polite">
         <div>
           {% if sync.status == 'running' %}
             <strong>Indexation en cours…</strong>
-            <span>La page se mettra à jour automatiquement.</span>
+            <span>Vous pouvez <a href="/">actualiser la page</a> dans quelques instants.</span>
           {% elif sync.status == 'completed' %}
             <strong>Dernière indexation terminée</strong>
             <span>{{ sync.discovered }} fichier(s), {{ sync.indexed }} indexé(s), {{ sync.unchanged }} inchangé(s){% if sync.failed %}, {{ sync.failed }} en erreur{% endif %}.</span>
@@ -55,17 +54,22 @@
       {% endif %}
 
       <section class="library-tools" aria-label="Outils de la bibliothèque">
-        <p><strong>{{ books|length }}</strong> livre{% if books|length != 1 %}s{% endif %}</p>
-        <label class="search">
-          <span class="sr-only">Rechercher un livre</span>
-          <input type="search" placeholder="Titre, auteur ou ISBN…" data-search autocomplete="off">
-        </label>
+        <p>
+          <strong>{{ books|length }}</strong>
+          {% if query %}sur {{ total_books }} {% endif %}livre{% if books|length != 1 %}s{% endif %}
+        </p>
+        <form class="search" action="/" method="get">
+          <label class="sr-only" for="book-search">Rechercher un livre</label>
+          <input id="book-search" name="q" value="{{ query }}" type="search" placeholder="Titre, auteur ou ISBN…" autocomplete="off">
+          <button type="submit">Rechercher</button>
+          {% if query %}<a href="/">Effacer</a>{% endif %}
+        </form>
       </section>
 
       {% if books %}
-      <section class="book-grid" aria-label="Livres" data-book-grid>
+      <section class="book-grid" aria-label="Livres">
         {% for book in books %}
-        <article class="book-card" data-searchable="{{ book.title }} {{ book.author or '' }} {{ book.isbn or '' }}">
+        <article class="book-card">
           <div class="cover-wrap">
             {% if book.cover_filename %}
               <img src="{{ url_for('covers', path=book.cover_filename) }}" alt="Couverture de {{ book.title }}" loading="lazy">
@@ -86,20 +90,27 @@
             {% if book.parse_error %}
               <p class="parse-error" title="{{ book.parse_error }}">Métadonnées incomplètes</p>
             {% endif %}
+            <a class="download-button" href="{{ url_for('download_book', book_id=book.id) }}" download>
+              Télécharger sur Kobo
+            </a>
           </div>
         </article>
         {% endfor %}
       </section>
-      <p class="no-results" data-no-results hidden>Aucun livre ne correspond à cette recherche.</p>
       {% else %}
       <section class="empty-state">
         <span aria-hidden="true">⌁</span>
-        <h2>Votre bibliothèque attend ses premiers livres</h2>
-        <p>Lancez l’indexation pour analyser les PDF et EPUB du Drive configuré.</p>
+        {% if query %}
+          <h2>Aucun livre trouvé</h2>
+          <p><a href="/">Afficher toute la bibliothèque</a></p>
+        {% else %}
+          <h2>Votre bibliothèque attend ses premiers livres</h2>
+          <p>Lancez l’indexation pour analyser les PDF et EPUB du Drive configuré.</p>
+        {% endif %}
       </section>
       {% endif %}
     </main>
 
-    <footer>myEbooks · vos fichiers restent sur votre Drive</footer>
+    <footer>myEbooks · interface sans JavaScript · EPUB et PDF sans DRM</footer>
   </body>
 </html>

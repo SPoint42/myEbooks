@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "myebooks"
-version = "0.1.0"
+version = "0.2.0"
 description = "A small, self-hosted web library for PDF and EPUB files stored on Google Drive."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -13,6 +13,7 @@ authors = [{ name = "SPoint42" }]
 dependencies = [
   "EbookLib>=0.19",
   "fastapi>=0.115",
+  "gdown>=6.0,<7",
   "google-api-python-client>=2.160",
   "google-auth>=2.38",
   "jinja2>=3.1",

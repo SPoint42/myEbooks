@@ -1,7 +1,7 @@
 # myEbooks
 
 `myEbooks` est une petite bibliothèque Web auto-hébergée pour les fichiers PDF et EPUB
-stockés dans un dossier ou un Drive partagé Google. L’application extrait le titre,
+stockés dans un dossier Google Drive partagé par lien. L’application extrait le titre,
 l’auteur, l’année, l’ISBN et la couverture lorsqu’ils sont présents, puis conserve le
 résultat dans SQLite pour ne pas reparcourir les fichiers inchangés.
 
@@ -10,12 +10,15 @@ résultat dans SQLite pour ne pas reparcourir les fichiers inchangés.
 
 ## Fonctionnalités du MVP
 
-- galerie Web responsive, recherche instantanée par titre, auteur ou ISBN ;
+- galerie Web responsive, recherche serveur par titre, auteur ou ISBN ;
 - extraction des métadonnées Dublin Core et de la couverture des EPUB ;
 - extraction des métadonnées, de l’ISBN textuel et rendu de la première page des PDF ;
 - indexation à la demande, incrémentale par checksum ou date de modification ;
 - cache SQLite pour les métadonnées et cache local pour les vignettes ;
 - accès Google Drive strictement en lecture seule ;
+- configuration d’un dossier public avec son seul lien, sans compte Google ;
+- téléchargement direct du PDF ou de l’EPUB depuis une liseuse Kobo ;
+- interface HTML/CSS utilisable sans JavaScript ;
 - faux Drive intégré avec un vrai PDF et un vrai EPUB pour essayer le MVP immédiatement ;
 - tests unitaires et d’intégration, CI GitHub Actions et image Docker non-root.
 
@@ -40,9 +43,45 @@ Avec Docker :
 docker compose up --build
 ```
 
-## Connexion à Google Drive
+## Connexion par un lien Google Drive public
 
-L’intégration utilise un compte de service Google et le scope
+Le dossier doit être partagé avec l’accès général **Tous les utilisateurs disposant du lien**
+et le rôle **Lecteur**. Vérifiez aussi que le téléchargement n’a pas été désactivé par le
+propriétaire.
+
+Copiez simplement l’URL du dossier puis lancez l’application :
+
+```bash
+export EBOOK_SOURCE=google_public
+export GOOGLE_DRIVE_PUBLIC_URL='https://drive.google.com/drive/folders/1AbCDEF_identifiant'
+uvicorn myebooks.main:app --host 0.0.0.0 --port 8000
+```
+
+Ce mode parcourt récursivement le dossier public avec `gdown`. Il ne nécessite ni compte de
+service, ni clé Google Cloud. Le listing public ne fournit toutefois pas la date de
+modification ou le checksum : utilisez **Tout réanalyser** lorsqu’un fichier a été remplacé
+sur Drive en conservant le même identifiant.
+
+## Télécharger directement sur une Kobo
+
+1. Connectez la Kobo au même réseau que le serveur `myEbooks`.
+2. Ouvrez le navigateur expérimental de la Kobo et saisissez l’adresse du serveur, par
+   exemple `http://192.168.1.20:8000`.
+3. Recherchez un livre avec le formulaire HTML.
+4. Touchez **Télécharger sur Kobo**.
+
+L’application récupère le fichier depuis Drive puis le sert avec son nom d’origine, le bon
+type MIME et une réponse HTTP de téléchargement. Aucun JavaScript n’est nécessaire. Les
+EPUB et PDF doivent être dépourvus d’Adobe DRM ; les fichiers protégés nécessitent Adobe
+Digital Editions. Selon le modèle et son micrologiciel, un redémarrage ou une resynchronisation
+de la bibliothèque peut être nécessaire après un téléchargement depuis le navigateur.
+
+Ne rendez pas l’application accessible depuis Internet sans authentification : toute personne
+ayant accès à son URL pourrait télécharger les livres indexés.
+
+## Connexion par l’API Google Drive
+
+Cette variante, utile pour un dossier non public, utilise un compte de service Google et le scope
 `https://www.googleapis.com/auth/drive.readonly`.
 
 1. Dans Google Cloud, créez ou choisissez un projet et activez **Google Drive API**.
@@ -72,7 +111,7 @@ JSON du compte de service ne doit jamais être commité.
 ## Fonctionnement de l’indexation
 
 ```text
-Google Drive / Fake Drive
+Google Drive public / API / Fake Drive
           │ liste + téléchargement temporaire
           ▼
     Extracteur PDF ou EPUB ──────► vignette dans data/covers/
@@ -80,9 +119,10 @@ Google Drive / Fake Drive
           └──────────────────────► métadonnées dans SQLite
 ```
 
-À chaque demande, le backend compare le checksum Drive — ou à défaut la date de
-modification — avec la valeur enregistrée. Seuls les fichiers nouveaux ou modifiés sont
-téléchargés et analysés. Une option **Tout réanalyser** est disponible dans l’interface.
+Avec l’API Google Drive, le backend compare le checksum — ou à défaut la date de modification —
+avec la valeur enregistrée. Avec un lien public, il compare l’identifiant du fichier. Seuls les
+fichiers nouveaux ou identifiés comme modifiés sont téléchargés et analysés. Une option
+**Tout réanalyser** est disponible dans l’interface.
 Un livre supprimé du périmètre Drive disparaît de la bibliothèque lors de la synchronisation
 suivante.
 
@@ -99,8 +139,8 @@ pytest
 ```
 
 Les tests couvrent l’extraction PDF/EPUB, la validation ISBN, le rejet d’une archive EPUB
-avec traversée de chemin, le cache incrémental, la suppression d’un livre et le parcours Web
-avec protection CSRF.
+avec traversée de chemin, les connecteurs Drive API et public, le cache incrémental, la
+suppression d’un livre, le téléchargement Kobo et le parcours Web avec protection CSRF.
 
 ## Limites connues du MVP
 
