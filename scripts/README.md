@@ -13,6 +13,8 @@ Pour afficher les options réellement disponibles sans exécuter une opération 
 ./scripts/NOM_DU_SCRIPT --help
 ```
 
+La seule exception est `index_publish_deploy`, volontairement figé et sans aucun argument.
+
 ## Prérequis communs
 
 - Python 3 est requis pour `start_dev` et les scripts de catalogue.
@@ -282,6 +284,39 @@ MYEBOOKS_GITHUB_REPOSITORY=organisation/depot \
   ./scripts/deploy_scaleway --tag catalog-20260801T194011Z --watch
 ```
 
+## `index_publish_deploy` : tout indexer, publier et déployer
+
+Ce script sans argument réalise tout le cycle de production dans cet ordre :
+
+1. indexation incrémentale des EPUB du Drive public ;
+2. push du commit courant de `main` vers GitHub avec la clé SSH ;
+3. publication de SQLite et des couvertures dans une nouvelle GitHub Release ;
+4. déclenchement du déploiement Scaleway et attente du résultat de GitHub Actions.
+
+Le Drive est fixé directement dans le script :
+
+```text
+https://drive.google.com/drive/folders/1WeqHFZQ0zl0Oy5u6JiabChlIGx3D5sie?usp=sharing
+```
+
+Il se lance simplement depuis la racine du dépôt :
+
+```bash
+./scripts/index_publish_deploy
+```
+
+Le script ne prend aucune option, pas même `--help`. Avant son lancement :
+
+- arrêter `./start_dev` afin qu’aucune autre indexation ne soit active ;
+- commiter tous les changements ;
+- rester sur la branche `main` avec un dépôt propre ;
+- vérifier que `origin` vaut `git@github.com:SPoint42/myEbooks.git` ;
+- vérifier l’authentification avec `gh api user`.
+
+Le script ne crée volontairement aucun commit automatique : cela évite d’ajouter par erreur un
+fichier local, une donnée sensible ou une modification inachevée. Il s’arrête dès qu’une étape
+échoue et ne déclenche donc pas Scaleway si l’indexation ou la publication a échoué.
+
 ## `_run_catalog` : composant interne
 
 `scripts/_run_catalog` est le lanceur commun utilisé par `index_catalog`, `build_catalog`,
@@ -315,4 +350,10 @@ Publier puis déployer sont deux opérations séparées :
 ```bash
 ./scripts/publish_catalog --skip-index --data ./data
 ./scripts/deploy_scaleway --tag catalog-YYYYMMDDTHHMMSSZ --watch
+```
+
+Effectuer tout le cycle de production avec le Drive configuré pour ce projet :
+
+```bash
+./scripts/index_publish_deploy
 ```

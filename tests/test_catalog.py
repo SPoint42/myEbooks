@@ -214,6 +214,7 @@ def test_catalog_scripts_are_executable_and_document_their_actions():
         "publish_catalog",
         "install_catalog",
         "build_scaleway_image",
+        "index_publish_deploy",
     ):
         assert os.access(PROJECT_DIR / "scripts" / name, os.X_OK)
 

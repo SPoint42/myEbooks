@@ -9,6 +9,7 @@ PROJECT_DIR = Path(__file__).parents[1]
 WORKFLOW = PROJECT_DIR / ".github" / "workflows" / "deploy-scaleway.yml"
 TERRAFORM_DIR = PROJECT_DIR / "deploy" / "terraform"
 DEPLOY_SCRIPT = PROJECT_DIR / "scripts" / "deploy_scaleway"
+FULL_DEPLOY_SCRIPT = PROJECT_DIR / "scripts" / "index_publish_deploy"
 
 
 def test_deployment_workflow_is_manual_pinned_and_catalog_driven():
@@ -77,3 +78,30 @@ def test_deploy_script_is_executable_and_rejects_invalid_catalog_tag():
     )
     assert invalid_result.returncode == 2
     assert "catalog-YYYYMMDDTHHMMSSZ" in invalid_result.stderr
+
+
+def test_full_deploy_script_is_fixed_safe_and_uses_the_public_drive():
+    assert os.access(FULL_DEPLOY_SCRIPT, os.X_OK)
+
+    unexpected_argument = subprocess.run(
+        [str(FULL_DEPLOY_SCRIPT), "--help"],
+        cwd=PROJECT_DIR,
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    assert unexpected_argument.returncode == 2
+    assert "ne prend aucun argument" in unexpected_argument.stderr
+
+    script = FULL_DEPLOY_SCRIPT.read_text()
+    assert (
+        "https://drive.google.com/drive/folders/"
+        "1WeqHFZQ0zl0Oy5u6JiabChlIGx3D5sie?usp=sharing"
+    ) in script
+    assert 'INDEX_EXTENSIONS="epub"' in script
+    assert '"${SCRIPT_DIR}/index_catalog"' in script
+    assert 'git push origin "$EXPECTED_BRANCH"' in script
+    assert '"${SCRIPT_DIR}/publish_catalog" --skip-index' in script
+    assert '"${SCRIPT_DIR}/deploy_scaleway" --tag "$CATALOG_TAG" --watch' in script
+    assert "git add" not in script
+    assert "git commit" not in script

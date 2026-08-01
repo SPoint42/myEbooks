@@ -1,0 +1,120 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+if [[ $# -ne 0 ]]; then
+    echo "Erreur : index_publish_deploy ne prend aucun argument." >&2
+    exit 2
+fi
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
+DRIVE_URL="https://drive.google.com/drive/folders/1WeqHFZQ0zl0Oy5u6JiabChlIGx3D5sie?usp=sharing"
+DATA_DIR="${PROJECT_DIR}/data"
+INDEX_EXTENSIONS="epub"
+EXPECTED_BRANCH="main"
+EXPECTED_ORIGIN="git@github.com:SPoint42/myEbooks.git"
+GITHUB_REPOSITORY="SPoint42/myEbooks"
+PUBLISH_LOG=""
+
+cleanup() {
+    if [[ -n "$PUBLISH_LOG" && -f "$PUBLISH_LOG" ]]; then
+        rm -f -- "$PUBLISH_LOG"
+    fi
+}
+
+trap cleanup EXIT
+
+require_command() {
+    if ! command -v "$1" >/dev/null 2>&1; then
+        echo "Erreur : la commande '$1' est requise." >&2
+        exit 1
+    fi
+}
+
+require_clean_worktree() {
+    if [[ -n "$(git status --porcelain --untracked-files=normal)" ]]; then
+        echo "Erreur : le dépôt contient des changements non commités." >&2
+        echo "Commitez-les avant de lancer l'indexation et le déploiement :" >&2
+        git status --short >&2
+        exit 1
+    fi
+}
+
+require_command git
+require_command gh
+require_command sqlite3
+
+cd "$PROJECT_DIR"
+
+CURRENT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+if [[ "$CURRENT_ROOT" != "$PROJECT_DIR" ]]; then
+    echo "Erreur : $PROJECT_DIR n'est pas la racine du dépôt Git attendu." >&2
+    exit 1
+fi
+
+CURRENT_BRANCH="$(git branch --show-current)"
+if [[ "$CURRENT_BRANCH" != "$EXPECTED_BRANCH" ]]; then
+    echo "Erreur : ce déploiement doit être lancé depuis la branche $EXPECTED_BRANCH." >&2
+    exit 1
+fi
+
+ORIGIN_URL="$(git remote get-url origin 2>/dev/null || true)"
+if [[ "$ORIGIN_URL" != "$EXPECTED_ORIGIN" ]]; then
+    echo "Erreur : origin doit utiliser la clé SSH avec $EXPECTED_ORIGIN." >&2
+    exit 1
+fi
+
+require_clean_worktree
+
+if ! gh api user --jq .login >/dev/null 2>&1; then
+    echo "Erreur : authentifiez la CLI GitHub avec 'gh auth login'." >&2
+    exit 1
+fi
+
+if [[ -f "${DATA_DIR}/myebooks.sqlite3" ]]; then
+    if ! LATEST_SYNC="$(
+        sqlite3 -noheader -separator '|' "${DATA_DIR}/myebooks.sqlite3" \
+            "SELECT id, status FROM sync_runs ORDER BY id DESC LIMIT 1;"
+    )"; then
+        echo "Erreur : impossible de lire l'état d'indexation de ${DATA_DIR}." >&2
+        exit 1
+    fi
+    if [[ "$LATEST_SYNC" =~ ^[0-9]+\|running$ ]]; then
+        echo "Erreur : l'indexation ${LATEST_SYNC%%|*} est encore active." >&2
+        echo "Arrêtez le serveur local avec Ctrl+C, attendez sa fin, puis relancez ce script." >&2
+        exit 1
+    fi
+fi
+
+echo "Étape 1/4 : indexation incrémentale du Drive public…"
+"${SCRIPT_DIR}/index_catalog" \
+    --drive-url "$DRIVE_URL" \
+    --data "$DATA_DIR" \
+    --extensions "$INDEX_EXTENSIONS"
+
+require_clean_worktree
+
+echo "Étape 2/4 : push du commit courant sur GitHub par SSH…"
+git push origin "$EXPECTED_BRANCH"
+
+echo "Étape 3/4 : publication de SQLite et des couvertures dans une GitHub Release…"
+PUBLISH_LOG="$(mktemp -t myebooks-publish.XXXXXX)"
+"${SCRIPT_DIR}/publish_catalog" --skip-index --data "$DATA_DIR" 2>&1 | tee "$PUBLISH_LOG"
+
+CATALOG_TAG="$(
+    sed -nE \
+        's/^Catalogue publié dans la GitHub Release (catalog-[0-9]{8}T[0-9]{6}Z)$/\1/p' \
+        "$PUBLISH_LOG" \
+        | tail -n 1
+)"
+if [[ ! "$CATALOG_TAG" =~ ^catalog-[0-9]{8}T[0-9]{6}Z$ ]]; then
+    echo "Erreur : impossible de déterminer le tag du catalogue publié." >&2
+    exit 1
+fi
+
+echo "Étape 4/4 : déploiement de $CATALOG_TAG sur Scaleway…"
+MYEBOOKS_GITHUB_REPOSITORY="$GITHUB_REPOSITORY" \
+    "${SCRIPT_DIR}/deploy_scaleway" --tag "$CATALOG_TAG" --watch
+
+echo "Déploiement terminé avec succès pour $CATALOG_TAG."
