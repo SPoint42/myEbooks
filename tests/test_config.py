@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from myebooks.config import Settings
+from myebooks.config import Settings, parse_index_extensions
 
 
 def test_settings_defaults_to_fake_source(monkeypatch, tmp_path):
@@ -14,6 +14,23 @@ def test_settings_defaults_to_fake_source(monkeypatch, tmp_path):
     assert settings.source == "fake"
     assert settings.database_path == tmp_path / "myebooks.sqlite3"
     assert settings.background_index is False
+    assert settings.index_extensions == frozenset({"epub"})
+
+
+def test_index_extensions_are_normalized_from_environment(monkeypatch, tmp_path):
+    monkeypatch.setenv("EBOOK_SOURCE", "fake")
+    monkeypatch.setenv("EBOOK_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("EBOOK_INDEX_EXTENSIONS", ".EPUB, pdf")
+
+    settings = Settings.from_env()
+
+    assert settings.index_extensions == frozenset({"epub", "pdf"})
+
+
+@pytest.mark.parametrize("raw", ["", "epub,,pdf", "mobi", "epub,exe"])
+def test_unsupported_or_empty_index_extensions_are_rejected(raw):
+    with pytest.raises(ValueError):
+        parse_index_extensions(raw)
 
 
 def test_background_index_settings_are_parsed(monkeypatch, tmp_path):

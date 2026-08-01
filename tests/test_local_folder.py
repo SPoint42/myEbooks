@@ -5,7 +5,7 @@ from dataclasses import replace
 import pytest
 
 from myebooks.adapters.local_folder import LocalFolderSource
-from myebooks.demo import demo_epub
+from myebooks.demo import demo_epub, demo_pdf
 from myebooks.domain import RemoteFile
 
 
@@ -52,6 +52,20 @@ def test_local_folder_ignores_pdf_files(settings, tmp_path):
     (library / "ignored.pdf").write_bytes(b"%PDF-1.7")
 
     assert make_source(settings, library).list_files() == []
+
+
+def test_local_folder_lists_selected_pdf_files(settings, tmp_path):
+    library = tmp_path / "ebooks"
+    library.mkdir()
+    content = demo_pdf()
+    (library / "selected.pdf").write_bytes(content)
+    selected_settings = replace(settings, index_extensions=frozenset({"pdf"}))
+
+    files = make_source(selected_settings, library).list_files()
+
+    assert [remote_file.name for remote_file in files] == ["selected.pdf"]
+    assert files[0].mime_type == "application/pdf"
+    assert make_source(selected_settings, library).download(files[0]) == content
 
 
 def test_local_folder_ignores_symbolic_links(settings, tmp_path):

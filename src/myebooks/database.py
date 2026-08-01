@@ -5,7 +5,7 @@ from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
 
-from .domain import Book, ExtractedBook, IndexResult, RemoteFile
+from .domain import EBOOK_MIME_TYPES, Book, ExtractedBook, IndexResult, RemoteFile
 
 
 class LibraryDatabase:
@@ -109,7 +109,7 @@ class LibraryDatabase:
                 SELECT id, source_id, source_name, file_format, title, author,
                        publication_year, isbn, cover_filename, parse_error, indexed_at
                 FROM books
-                WHERE available = 1 AND file_format = 'epub'
+                WHERE available = 1
                 ORDER BY indexed_at DESC, id DESC
                 """
             ).fetchall()
@@ -121,8 +121,7 @@ class LibraryDatabase:
                 """
                 SELECT DISTINCT author
                 FROM books
-                WHERE available = 1 AND file_format = 'epub'
-                  AND author IS NOT NULL AND TRIM(author) <> ''
+                WHERE available = 1 AND author IS NOT NULL AND TRIM(author) <> ''
                 ORDER BY author COLLATE NOCASE
                 """
             ).fetchall()
@@ -135,7 +134,7 @@ class LibraryDatabase:
                 SELECT id, source_id, source_name, file_format, title, author,
                        publication_year, isbn, cover_filename, parse_error, indexed_at
                 FROM books
-                WHERE id = ? AND available = 1 AND file_format = 'epub'
+                WHERE id = ? AND available = 1
                 """,
                 (book_id,),
             ).fetchone()
@@ -166,8 +165,8 @@ class LibraryDatabase:
         self._require_writable()
         now = datetime.now(UTC).isoformat()
         file_format = remote_file.name.rsplit(".", 1)[-1].lower()
-        if file_format != "epub" or remote_file.mime_type != "application/epub+zip":
-            raise ValueError("Seuls les fichiers EPUB peuvent être indexés")
+        if EBOOK_MIME_TYPES.get(file_format) != remote_file.mime_type:
+            raise ValueError("Format de fichier non pris en charge")
         with closing(self.connect()) as connection, connection:
             connection.execute(
                 """

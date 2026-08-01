@@ -4,6 +4,8 @@ import re
 import threading
 from contextlib import closing
 from dataclasses import replace
+from html import unescape
+from urllib.parse import parse_qs, urlparse
 
 from fastapi.testclient import TestClient
 
@@ -177,34 +179,112 @@ def test_search_works_without_javascript(settings):
     assert "<script" not in response.text
 
 
-def test_legacy_pdf_rows_are_hidden_and_cannot_be_downloaded(settings):
-    database = initialize_catalog(settings)
-    with closing(database.connect()) as connection, connection:
-        connection.execute(
-            """
-            INSERT INTO books (
-                source_id, source_name, source_fingerprint, file_format, title,
-                available, indexed_at
-            ) VALUES (?, ?, ?, 'pdf', ?, 1, ?)
-            """,
-            (
-                "legacy-pdf",
-                "legacy.pdf",
-                "legacy",
-                "Ancien PDF",
-                "2026-07-31T12:00:00+00:00",
-            ),
+def test_public_google_drive_books_can_be_shared_from_the_web_page(settings):
+    source_id = "1EpubFileIdAbCdEfGhIjKlM"
+    source = FakeDriveSource()
+    source._files[source_id] = source._files.pop("demo-epub")
+    public_settings = replace(
+        settings,
+        source="google_public",
+        google_drive_public_url=(
+            "https://drive.google.com/drive/folders/1AbCdEfGhIjKlMnOpQrStUvWx"
+        ),
+    )
+    index_fake_catalog(public_settings, source)
+    app = create_app(public_settings, source)
+
+    with TestClient(app) as client:
+        page = client.get("/")
+
+    rendered_html = unescape(page.text)
+    whatsapp_match = re.search(r'href="(https://wa\.me/\?text=[^"]+)"', rendered_html)
+    imessage_match = re.search(r'href="(sms:\?body=[^"]+)"', rendered_html)
+    assert whatsapp_match is not None
+    assert imessage_match is not None
+
+    expected_drive_url = (
+        "https://drive.google.com/uc?export=download&"
+        f"id={source_id}"
+    )
+    whatsapp_message = parse_qs(urlparse(whatsapp_match.group(1)).query)["text"][0]
+    imessage_message = parse_qs(urlparse(imessage_match.group(1)).query)["body"][0]
+    assert whatsapp_message == imessage_message
+    assert "Clean Code — Robert C. Martin" in whatsapp_message
+    assert expected_drive_url in whatsapp_message
+    assert "<script" not in page.text
+
+
+def test_share_links_are_never_rendered_on_the_kobo_page(settings):
+    source_id = "1EpubFileIdAbCdEfGhIjKlM"
+    source = FakeDriveSource()
+    source._files[source_id] = source._files.pop("demo-epub")
+    public_settings = replace(
+        settings,
+        source="google_public",
+        google_drive_public_url=(
+            "https://drive.google.com/drive/folders/1AbCdEfGhIjKlMnOpQrStUvWx"
+        ),
+    )
+    index_fake_catalog(public_settings, source)
+    app = create_app(public_settings, source)
+
+    with TestClient(app) as client:
+        kobo_page = client.get("/kobo")
+        kobo_user_agent_page = client.get(
+            "/", headers={"user-agent": "Mozilla/5.0 Kobo eReader"}
         )
-    app = create_app(settings, FakeDriveSource())
+
+    for page in (kobo_page, kobo_user_agent_page):
+        assert "wa.me" not in page.text
+        assert "sms:?" not in page.text
+        assert "Partager" not in page.text
+
+
+def test_share_links_require_a_public_drive_source_and_a_valid_file_id(settings):
+    local_source = index_fake_catalog(settings)
+    local_app = create_app(settings, local_source)
+
+    invalid_public_settings = replace(
+        settings,
+        data_dir=settings.data_dir.parent / "invalid-public-data",
+        source="google_public",
+        google_drive_public_url=(
+            "https://drive.google.com/drive/folders/1AbCdEfGhIjKlMnOpQrStUvWx"
+        ),
+    )
+    invalid_source = index_fake_catalog(invalid_public_settings)
+    invalid_public_app = create_app(invalid_public_settings, invalid_source)
+
+    with TestClient(local_app) as client:
+        local_page = client.get("/")
+    with TestClient(invalid_public_app) as client:
+        invalid_public_page = client.get("/")
+
+    for page in (local_page, invalid_public_page):
+        assert "wa.me" not in page.text
+        assert "sms:?" not in page.text
+
+
+def test_selected_pdf_is_displayed_and_can_be_downloaded(settings):
+    selected_settings = replace(
+        settings,
+        index_extensions=frozenset({"epub", "pdf"}),
+    )
+    source = index_fake_catalog(selected_settings)
+    app = create_app(selected_settings, source)
 
     with TestClient(app) as client:
         page = client.get("/")
         books = client.get("/api/books").json()
-        download = client.get("/books/1/download")
+        pdf = next(book for book in books if book["file_format"] == "pdf")
+        download = client.get(f"/books/{pdf['id']}/download")
 
-    assert "Ancien PDF" not in page.text
-    assert books == []
-    assert download.status_code == 404
+    assert "The Pragmatic Programmer" in page.text
+    assert "PDF" in page.text
+    assert len(books) == 2
+    assert download.status_code == 200
+    assert download.headers["content-type"] == "application/pdf"
+    assert download.content == source._files["demo-pdf"][2]
 
 
 def test_home_displays_most_recently_indexed_books_first(settings):
@@ -346,6 +426,27 @@ def test_kobo_download_uses_file_extension_and_legacy_headers(settings):
     assert '<input class="action" type="submit" value="TELECHARGER EPUB">' in page.text
     assert 'action="/kobo/books/' in page.text
     assert 'href="http://testserver/kobo/books/' not in page.text
+
+
+def test_selected_pdf_can_be_downloaded_from_kobo_page(settings):
+    selected_settings = replace(
+        settings,
+        index_extensions=frozenset({"pdf"}),
+    )
+    source = index_fake_catalog(selected_settings)
+    app = create_app(selected_settings, source)
+
+    with TestClient(app) as client:
+        page = client.get("/kobo")
+        match = re.search(r'action="(/kobo/books/\d+/[^"]+\.pdf)"', page.text)
+        assert match is not None
+        response = client.get(match.group(1))
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/pdf"
+    assert response.headers["content-disposition"].endswith('.pdf"')
+    assert response.content == source._files["demo-pdf"][2]
+    assert '<input class="action" type="submit" value="TELECHARGER PDF">' in page.text
 
 
 def test_kobo_download_rejects_a_mismatched_filename(settings):

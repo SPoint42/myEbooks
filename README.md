@@ -1,6 +1,6 @@
 # myEbooks
 
-`myEbooks` est une petite bibliothèque Web pour les fichiers EPUB stockés dans un
+`myEbooks` est une petite bibliothèque Web pour les fichiers EPUB et PDF stockés dans un
 dossier Google Drive partagé par lien. Sur le Mac, l’application démarre immédiatement puis
 extrait le titre, l’auteur, l’année, l’ISBN et la couverture en arrière-plan dans SQLite. L’image
 Scaleway consomme ensuite un catalogue préconstruit en lecture seule. Aucun endpoint HTTP ne
@@ -13,10 +13,11 @@ permet de déclencher une indexation.
 
 - galerie Web responsive, recherche, filtre par auteur et pagination de 10 livres par page ;
 - page d’accueil classée du livre le plus récemment indexé au plus ancien ;
-- extraction des métadonnées, de l’ISBN et de la couverture des EPUB ;
+- sélection des formats à indexer avec une liste d’extensions (`epub`, `pdf`) ;
+- extraction des métadonnées, de l’ISBN et de la couverture des EPUB et PDF ;
 - indexation locale incrémentale par checksum ou date de modification ;
 - accès Google Drive strictement en lecture seule, par lien public ou compte de service ;
-- téléchargement direct de l’EPUB depuis une Kobo ;
+- téléchargement direct de l’ebook depuis une Kobo ;
 - interface HTML/CSS utilisable sans JavaScript ;
 - catalogue SQLite et vignettes publiables comme artefact GitHub vérifié par SHA-256 ;
 - runtime SQLite strictement en lecture seule et image Docker non-root pour Scaleway ;
@@ -74,7 +75,12 @@ bouton d’indexation n’existe dans `/`, `/kobo` ou ailleurs dans l’applicat
 
 Le listing public ne fournit ni date de modification ni checksum. Utilisez `--force-index`
 lorsqu’un fichier a été remplacé sur Drive en conservant le même identifiant.
-Les fichiers PDF présents dans le Drive ou le dossier local sont systématiquement ignorés.
+Par défaut, seuls les EPUB sont indexés. Pour inclure aussi les PDF :
+
+```bash
+./start_dev --kobo --extensions epub,pdf \
+  --drive-url 'https://drive.google.com/drive/folders/1WeqHFZQ0zl0Oy5u6JiabChlIGx3D5sie?usp=sharing'
+```
 
 ## Construire le catalogue de déploiement
 
@@ -82,6 +88,7 @@ Pour indexer le Drive sans démarrer le serveur, générer l’archive et prépa
 
 ```bash
 ./scripts/build_catalog \
+  --extensions epub,pdf \
   --drive-url 'https://drive.google.com/drive/folders/1WeqHFZQ0zl0Oy5u6JiabChlIGx3D5sie?usp=sharing'
 ```
 
@@ -93,7 +100,7 @@ Le script produit :
 - `deploy/catalog/`, contenu incorporé à l’image Scaleway.
 
 L’archive contient uniquement SQLite, un manifeste et les vignettes référencées. Aucun fichier
-EPUB source n’est copié dans l’artefact. La base exportée est une copie SQLite cohérente, sans
+EPUB ou PDF source n’est copié dans l’artefact. La base exportée est une copie SQLite cohérente, sans
 journal WAL, contrôlée avant sa mise en archive.
 
 Pour mettre uniquement à jour le cache local :
@@ -103,8 +110,9 @@ Pour mettre uniquement à jour le cache local :
   --drive-url 'https://drive.google.com/drive/folders/1WeqHFZQ0zl0Oy5u6JiabChlIGx3D5sie?usp=sharing'
 ```
 
-Les scripts acceptent également `--library /chemin/vers/les/ebooks`, `--fake`, `--data` et
-`--force`.
+Les scripts acceptent également `--library /chemin/vers/les/ebooks`, `--fake`, `--data`,
+`--force` et `--extensions epub,pdf`. La variable équivalente est
+`EBOOK_INDEX_EXTENSIONS=epub,pdf`.
 
 ## Publier le catalogue comme artefact GitHub
 
@@ -243,7 +251,7 @@ le stockage facturé.
 3. Recherchez un livre avec le formulaire HTML.
 4. Touchez **Télécharger sur Kobo**.
 
-L’application récupère l’EPUB depuis Drive puis le sert avec son nom d’origine et le bon type
+L’application récupère l’EPUB ou le PDF depuis Drive puis le sert avec son nom d’origine et le bon type
 MIME. Le fichier doit être dépourvu d’Adobe DRM. Selon le modèle de Kobo, un redémarrage ou une
 resynchronisation de la bibliothèque peut être nécessaire.
 
@@ -274,7 +282,7 @@ documentées dans [`.env.example`](.env.example).
 Google Drive / dossier local
           │ script exécuté sur le Mac
           ▼
-         Extracteur EPUB ────────► vignettes
+     Extracteur EPUB/PDF ────────► vignettes
           │
           └──────────────────────► SQLite
                                       │
@@ -297,14 +305,14 @@ ruff check .
 pytest
 ```
 
-Les tests couvrent notamment l’extraction EPUB, les connecteurs Drive, l’indexation de démarrage
+Les tests couvrent notamment l’extraction EPUB/PDF, les connecteurs Drive, l’indexation de démarrage
 en arrière-plan, la création et la vérification de l’artefact, le runtime SQLite en lecture seule,
 le classement des derniers livres indexés, la pagination, les téléchargements Kobo et la
 structure sécurisée du déploiement GitHub Actions/Terraform.
 
 ## Limites connues
 
-- les fichiers PDF sont volontairement ignorés ;
+- seuls les formats EPUB et PDF sont actuellement pris en charge ;
 - aucune authentification utilisateur intégrée ;
 - une nouvelle indexation n’est visible en production qu’après publication du catalogue et
   construction d’une nouvelle image.

@@ -3,6 +3,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
+EBOOK_MIME_TYPES = {
+    "epub": "application/epub+zip",
+    "pdf": "application/pdf",
+}
+SUPPORTED_EBOOK_EXTENSIONS = frozenset(EBOOK_MIME_TYPES)
+
 
 @dataclass(frozen=True, slots=True)
 class RemoteFile:

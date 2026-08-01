@@ -21,15 +21,17 @@ from fastapi.responses import (
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from .adapters.public_google_drive import DRIVE_FILE_ID
 from .config import Settings
 from .database import LibraryDatabase
-from .domain import EbookSource, RemoteFile
+from .domain import Book, EbookSource, RemoteFile
 from .indexer import IndexAlreadyRunning, LibraryIndexer
 from .sources import create_source, source_label
 
 LOGGER = logging.getLogger(__name__)
 PACKAGE_DIR = Path(__file__).parent
 BOOKS_PER_PAGE = 10
+PUBLIC_GOOGLE_DRIVE_DOWNLOAD_URL = "https://drive.google.com/uc"
 
 
 def _safe_download_name(filename: str, file_format: str) -> str:
@@ -77,6 +79,24 @@ def _kobo_cover_png(path: Path) -> bytes:
 def _chunks(content: bytes, size: int = 512 * 1024):
     for offset in range(0, len(content), size):
         yield content[offset : offset + size]
+
+
+def _public_google_drive_share_links(book: Book) -> dict[str, str] | None:
+    if not DRIVE_FILE_ID.fullmatch(book.source_id):
+        return None
+
+    direct_download_url = (
+        f"{PUBLIC_GOOGLE_DRIVE_DOWNLOAD_URL}?"
+        f"{urlencode({'export': 'download', 'id': book.source_id})}"
+    )
+    description = book.title
+    if book.author:
+        description = f"{description} — {book.author}"
+    message = f"{description}\n{direct_download_url}"
+    return {
+        "whatsapp": f"https://wa.me/?{urlencode({'text': message})}",
+        "imessage": f"sms:?{urlencode({'body': message})}",
+    }
 
 
 def create_app(
@@ -173,6 +193,14 @@ def create_app(
                 parameters["author"] = selected_author
             return f"{pagination_path}?{urlencode(parameters)}"
 
+        share_links = {}
+        if settings.source == "google_public":
+            share_links = {
+                book.id: links
+                for book in books
+                if (links := _public_google_drive_share_links(book)) is not None
+            }
+
         return {
             "books": books,
             "total_books": len(all_books),
@@ -189,6 +217,7 @@ def create_app(
             "previous_page_url": page_url(page - 1) if page > 1 else None,
             "next_page_url": page_url(page + 1) if page < total_pages else None,
             "source_name": source_label(settings),
+            "share_links": share_links,
             "kobo_download_paths": {
                 book.id: (
                     f"/kobo/books/{book.id}/"

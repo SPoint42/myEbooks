@@ -9,7 +9,7 @@ from pathlib import Path
 
 from .config import Settings
 from .database import LibraryDatabase
-from .domain import EbookSource, ExtractedBook, IndexResult, RemoteFile
+from .domain import EBOOK_MIME_TYPES, EbookSource, ExtractedBook, IndexResult, RemoteFile
 from .extractors import extract_book
 
 LOGGER = logging.getLogger("uvicorn.error.myebooks.indexer")
@@ -17,10 +17,15 @@ ALLOWED_COVER_EXTENSIONS = {"jpg", "png", "gif", "webp"}
 INDEX_CANCELLATION_FILENAME = ".myebooks-index-cancel"
 
 
-def _is_epub(remote_file: RemoteFile) -> bool:
+def _ebook_extension(remote_file: RemoteFile) -> str:
+    return remote_file.name.rsplit(".", 1)[-1].lower() if "." in remote_file.name else ""
+
+
+def _is_selected_ebook(remote_file: RemoteFile, settings: Settings) -> bool:
+    extension = _ebook_extension(remote_file)
     return (
-        remote_file.name.lower().endswith(".epub")
-        and remote_file.mime_type == "application/epub+zip"
+        extension in settings.index_extensions
+        and EBOOK_MIME_TYPES.get(extension) == remote_file.mime_type
     )
 
 
@@ -100,11 +105,14 @@ class LibraryIndexer:
 
         sync_id = self.database.start_sync()
         try:
-            LOGGER.info("Indexation démarrée : recensement des livres de la source…")
+            LOGGER.info(
+                "Indexation démarrée pour les formats %s : recensement des livres…",
+                ", ".join(sorted(self.settings.index_extensions)),
+            )
             remote_files = [
                 remote_file
                 for remote_file in self.source.list_files()
-                if _is_epub(remote_file)
+                if _is_selected_ebook(remote_file, self.settings)
             ]
             present_ids = {remote_file.id for remote_file in remote_files}
             indexed = unchanged = failed = 0

@@ -10,13 +10,13 @@ import httpx
 from gdown.exceptions import FileURLRetrievalError
 
 from ..config import Settings
-from ..domain import RemoteFile
+from ..domain import EBOOK_MIME_TYPES, RemoteFile
 
 DRIVE_FILE_ID = re.compile(r"^[A-Za-z0-9_-]{20,}$")
 DIRECT_DOWNLOAD_URL = "https://drive.usercontent.google.com/download"
 LOGGER = logging.getLogger("uvicorn.error.myebooks.google_drive")
 MIME_BY_EXTENSION = {
-    ".epub": "application/epub+zip",
+    f".{extension}": mime_type for extension, mime_type in EBOOK_MIME_TYPES.items()
 }
 
 
@@ -28,6 +28,7 @@ class PublicGoogleDriveSource:
             raise ValueError("Le lien du dossier Google Drive public est requis")
         self.folder_url = settings.google_drive_public_url
         self.max_file_size = settings.max_file_size
+        self.index_extensions = settings.index_extensions
 
     def list_files(self) -> list[RemoteFile]:
         entries = gdown.download_folder(
@@ -39,7 +40,11 @@ class PublicGoogleDriveSource:
         files: list[RemoteFile] = []
         for entry in entries:
             suffix = PurePosixPath(entry.path).suffix.lower()
-            if suffix not in MIME_BY_EXTENSION or not DRIVE_FILE_ID.fullmatch(entry.id):
+            if (
+                suffix not in MIME_BY_EXTENSION
+                or suffix.removeprefix(".") not in self.index_extensions
+                or not DRIVE_FILE_ID.fullmatch(entry.id)
+            ):
                 continue
             files.append(
                 RemoteFile(
@@ -56,8 +61,14 @@ class PublicGoogleDriveSource:
     def _validate_content(self, remote_file: RemoteFile, content: bytes) -> bytes:
         if len(content) > self.max_file_size:
             raise ValueError("Fichier trop volumineux")
-        if not content.startswith(b"PK"):
+        extension = PurePosixPath(remote_file.name).suffix.lower()
+        expected_mime = MIME_BY_EXTENSION.get(extension)
+        if expected_mime is None or remote_file.mime_type != expected_mime:
+            raise ValueError("Format de fichier non pris en charge")
+        if extension == ".epub" and not content.startswith(b"PK"):
             raise ValueError("Le contenu téléchargé n'est pas un EPUB valide")
+        if extension == ".pdf" and b"%PDF-" not in content[:1024]:
+            raise ValueError("Le contenu téléchargé n'est pas un PDF valide")
         return content
 
     def _download_with_gdown(self, remote_file: RemoteFile) -> bytes:
@@ -103,11 +114,9 @@ class PublicGoogleDriveSource:
     def download(self, remote_file: RemoteFile) -> bytes:
         if not DRIVE_FILE_ID.fullmatch(remote_file.id):
             raise ValueError("Identifiant Google Drive invalide")
-        if (
-            not remote_file.name.lower().endswith(".epub")
-            or remote_file.mime_type != "application/epub+zip"
-        ):
-            raise ValueError("Seuls les fichiers EPUB peuvent être téléchargés")
+        extension = PurePosixPath(remote_file.name).suffix.lower()
+        if MIME_BY_EXTENSION.get(extension) != remote_file.mime_type:
+            raise ValueError("Format de fichier non pris en charge")
         try:
             return self._download_with_gdown(remote_file)
         except FileURLRetrievalError:

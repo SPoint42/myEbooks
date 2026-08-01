@@ -7,14 +7,20 @@ import pytest
 from gdown.exceptions import FileURLRetrievalError
 
 from myebooks.adapters.public_google_drive import PublicGoogleDriveSource
+from myebooks.demo import demo_pdf
 from myebooks.domain import RemoteFile
 
 PUBLIC_URL = "https://drive.google.com/drive/folders/1AbCdEfGhIjKlMnOpQrStUvWx"
 
 
-def public_source(settings):
+def public_source(settings, extensions=frozenset({"epub"})):
     return PublicGoogleDriveSource(
-        replace(settings, source="google_public", google_drive_public_url=PUBLIC_URL)
+        replace(
+            settings,
+            source="google_public",
+            google_drive_public_url=PUBLIC_URL,
+            index_extensions=extensions,
+        )
     )
 
 
@@ -65,8 +71,8 @@ def test_public_file_download_is_bounded(monkeypatch, settings):
     assert source.download(remote_file) == b"PK\x03\x04a public ebook"
 
 
-def test_public_file_download_rejects_pdf(settings):
-    source = public_source(settings)
+def test_public_file_download_accepts_valid_pdf(monkeypatch, settings):
+    source = public_source(settings, frozenset({"pdf"}))
     remote_file = RemoteFile(
         id="1PdfFileIdAbCdEfGhIjKlMn",
         name="book.pdf",
@@ -74,8 +80,19 @@ def test_public_file_download_rejects_pdf(settings):
         modified_time="public-link-v1",
     )
 
-    with pytest.raises(ValueError, match="Seuls les fichiers EPUB"):
-        source.download(remote_file)
+    content = demo_pdf()
+
+    def fake_download(*, output, progress, **_arguments):
+        output.write(content)
+        progress(len(content), len(content))
+        return output
+
+    monkeypatch.setattr(
+        "myebooks.adapters.public_google_drive.gdown.download",
+        fake_download,
+    )
+
+    assert source.download(remote_file) == content
 
 
 def test_public_file_download_falls_back_to_googleusercontent(monkeypatch, settings):

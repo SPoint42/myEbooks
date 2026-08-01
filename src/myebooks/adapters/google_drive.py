@@ -7,7 +7,7 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
 
 from ..config import Settings
-from ..domain import RemoteFile
+from ..domain import EBOOK_MIME_TYPES, RemoteFile
 
 DRIVE_READONLY_SCOPE = "https://www.googleapis.com/auth/drive.readonly"
 FOLDER_MIME_TYPE = "application/vnd.google-apps.folder"
@@ -24,19 +24,24 @@ class GoogleDriveSource:
         self.drive_id = settings.google_drive_id
         self.folder_id = settings.google_drive_folder_id
         self.max_file_size = settings.max_file_size
+        self.index_extensions = settings.index_extensions
 
-    @staticmethod
-    def _is_ebook(item: dict[str, object]) -> bool:
+    def _is_ebook(self, item: dict[str, object]) -> bool:
         name = str(item.get("name", "")).lower()
-        return name.endswith(".epub")
+        extension = name.rsplit(".", 1)[-1] if "." in name else ""
+        return extension in self.index_extensions
 
     @staticmethod
     def _remote_file(item: dict[str, object]) -> RemoteFile:
         raw_size = item.get("size")
+        name = str(item["name"])
+        extension = name.rsplit(".", 1)[-1].lower() if "." in name else ""
         return RemoteFile(
             id=str(item["id"]),
-            name=str(item["name"]),
-            mime_type=str(item.get("mimeType", "application/octet-stream")),
+            name=name,
+            mime_type=EBOOK_MIME_TYPES.get(
+                extension, str(item.get("mimeType", "application/octet-stream"))
+            ),
             modified_time=str(item.get("modifiedTime", "")),
             checksum=str(item["md5Checksum"]) if item.get("md5Checksum") else None,
             size=int(str(raw_size)) if raw_size is not None else None,

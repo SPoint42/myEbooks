@@ -3,22 +3,26 @@ from __future__ import annotations
 from myebooks.adapters.google_drive import FOLDER_MIME_TYPE, GoogleDriveSource
 
 
-def bare_source(folder_id=None):
+def bare_source(folder_id=None, extensions=frozenset({"epub"})):
     source = GoogleDriveSource.__new__(GoogleDriveSource)
     source.folder_id = folder_id
     source.drive_id = "shared-drive"
     source.max_file_size = 1024
+    source.index_extensions = extensions
     return source
 
 
-def test_ebook_detection_accepts_only_epub_extension():
-    assert GoogleDriveSource._is_ebook(
+def test_ebook_detection_uses_selected_extensions():
+    source = bare_source()
+    assert source._is_ebook(
         {"name": "book.EPUB", "mimeType": "application/octet-stream"}
     )
-    assert not GoogleDriveSource._is_ebook(
+    assert not source._is_ebook(
         {"name": "book.pdf", "mimeType": "application/pdf"}
     )
-    assert not GoogleDriveSource._is_ebook({"name": "notes.txt", "mimeType": "text/plain"})
+    source.index_extensions = frozenset({"epub", "pdf"})
+    assert source._is_ebook({"name": "book.pdf", "mimeType": "application/pdf"})
+    assert not source._is_ebook({"name": "notes.txt", "mimeType": "text/plain"})
 
 
 def test_folder_listing_is_recursive(monkeypatch):
@@ -70,3 +74,25 @@ def test_drive_listing_filters_non_ebooks(monkeypatch):
     )
 
     assert source.list_files() == []
+
+
+def test_drive_listing_returns_selected_pdf(monkeypatch):
+    source = bare_source(extensions=frozenset({"pdf"}))
+    monkeypatch.setattr(
+        source,
+        "_list_query",
+        lambda _query: [
+            {
+                "id": "pdf-1",
+                "name": "book.pdf",
+                "mimeType": "application/pdf",
+                "modifiedTime": "now",
+            },
+            {"id": "epub-1", "name": "book.epub", "mimeType": "application/epub+zip"},
+        ],
+    )
+
+    files = source.list_files()
+
+    assert [remote_file.id for remote_file in files] == ["pdf-1"]
+    assert files[0].mime_type == "application/pdf"

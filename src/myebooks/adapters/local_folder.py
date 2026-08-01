@@ -6,11 +6,11 @@ import re
 from pathlib import Path
 
 from ..config import Settings
-from ..domain import RemoteFile
+from ..domain import EBOOK_MIME_TYPES, RemoteFile
 
 LOCAL_FILE_ID = re.compile(r"^[0-9a-f]{64}$")
 MIME_BY_EXTENSION = {
-    ".epub": "application/epub+zip",
+    f".{extension}": mime_type for extension, mime_type in EBOOK_MIME_TYPES.items()
 }
 
 
@@ -22,6 +22,7 @@ class LocalFolderSource:
             raise ValueError("Le répertoire local des ebooks est requis")
         self.root = settings.local_library_dir.resolve(strict=True)
         self.max_file_size = settings.max_file_size
+        self.index_extensions = settings.index_extensions
         self._paths: dict[str, Path] = {}
 
     @staticmethod
@@ -40,7 +41,11 @@ class LocalFolderSource:
             for filename in sorted(file_names):
                 path = Path(current_dir) / filename
                 suffix = path.suffix.lower()
-                if suffix not in MIME_BY_EXTENSION or path.is_symlink():
+                if (
+                    suffix not in MIME_BY_EXTENSION
+                    or suffix.removeprefix(".") not in self.index_extensions
+                    or path.is_symlink()
+                ):
                     continue
                 resolved = path.resolve(strict=True)
                 if not resolved.is_relative_to(self.root):

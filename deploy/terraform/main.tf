@@ -17,7 +17,7 @@ resource "scaleway_container_namespace" "this" {
 
 resource "scaleway_container" "this" {
   name                   = local.resource_name
-  description            = "Catalogue EPUB myEbooks en lecture seule"
+  description            = "Catalogue d'ebooks myEbooks en lecture seule"
   namespace_id           = scaleway_container_namespace.this.id
   image                  = var.image
   port                   = var.port

@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+from dataclasses import replace
 from pathlib import Path
 
 from .catalog import (
@@ -15,16 +16,23 @@ from .catalog import (
     install_catalog_archive,
     publish_catalog_release,
 )
-from .config import Settings
+from .config import Settings, parse_index_extensions
 from .sources import create_source
 
 PROJECT_DIR = Path(__file__).resolve().parents[2]
 
 
+def _parse_extension_argument(raw: str) -> frozenset[str]:
+    try:
+        return parse_index_extensions(raw)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
+
+
 def _add_source_arguments(parser: argparse.ArgumentParser) -> None:
     sources = parser.add_mutually_exclusive_group()
     sources.add_argument("--drive-url", help="URL HTTPS du dossier Google Drive public")
-    sources.add_argument("--library", type=Path, help="Dossier local de fichiers EPUB")
+    sources.add_argument("--library", type=Path, help="Dossier local de fichiers EPUB/PDF")
     sources.add_argument("--fake", action="store_true", help="Utilise les deux ebooks de démo")
     parser.add_argument(
         "--data",
@@ -33,27 +41,43 @@ def _add_source_arguments(parser: argparse.ArgumentParser) -> None:
         help="Cache local SQLite et vignettes (défaut : ./data)",
     )
     parser.add_argument("--force", action="store_true", help="Réanalyse tous les fichiers")
+    parser.add_argument(
+        "--extensions",
+        type=_parse_extension_argument,
+        metavar="LISTE",
+        help="Extensions à indexer, séparées par des virgules (défaut : epub)",
+    )
 
 
 def _settings_from_arguments(arguments: argparse.Namespace) -> Settings:
     data_dir = arguments.data.expanduser().resolve()
+    index_extensions = arguments.extensions or parse_index_extensions(
+        os.getenv("EBOOK_INDEX_EXTENSIONS", "epub")
+    )
     if arguments.drive_url:
         settings = Settings(
             data_dir=data_dir,
             source="google_public",
             google_drive_public_url=arguments.drive_url,
+            index_extensions=index_extensions,
         )
     elif arguments.library:
         settings = Settings(
             data_dir=data_dir,
             source="local",
             local_library_dir=arguments.library.expanduser().resolve(),
+            index_extensions=index_extensions,
         )
     elif arguments.fake:
-        settings = Settings(data_dir=data_dir, source="fake")
+        settings = Settings(
+            data_dir=data_dir,
+            source="fake",
+            index_extensions=index_extensions,
+        )
     else:
         os.environ["EBOOK_DATA_DIR"] = str(data_dir)
         settings = Settings.from_env()
+        settings = replace(settings, index_extensions=index_extensions)
     settings.validate()
     return settings
 
@@ -157,9 +181,16 @@ def main(argv: list[str] | None = None) -> int:
     if arguments.force_publish and not arguments.skip_index:
         parser.error("--force-publish nécessite --skip-index")
     if arguments.skip_index:
-        if arguments.drive_url or arguments.library or arguments.fake or arguments.force:
+        if (
+            arguments.drive_url
+            or arguments.library
+            or arguments.fake
+            or arguments.force
+            or arguments.extensions is not None
+        ):
             parser.error(
-                "--skip-index ne peut pas être combiné avec une source ou --force ; "
+                "--skip-index ne peut pas être combiné avec une source, --extensions "
+                "ou --force ; "
                 "utilisez seulement --data et éventuellement --output."
             )
         settings = Settings(data_dir=arguments.data.expanduser().resolve())

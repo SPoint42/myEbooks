@@ -79,6 +79,10 @@ h1 { max-width: 700px; margin: 0; font-family: Georgia, "Times New Roman", serif
 .parse-error { margin: 8px 0 0; color: var(--warning); font-size: .72rem; }
 .download-button { display: block; min-height: 48px; margin-top: 16px; padding: 13px 10px; border: 2px solid var(--accent); border-radius: 10px; color: var(--accent-dark); background: var(--card); font-size: .92rem; font-weight: 800; text-align: center; text-decoration: none; }
 .download-button:hover, .download-button:focus { color: white; background: var(--accent); }
+.share-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 7px 10px; margin-top: 10px; color: var(--muted); font-size: .78rem; }
+.share-actions span { font-weight: 700; }
+.share-actions a { color: var(--accent-dark); font-weight: 750; text-underline-offset: 3px; }
+.share-actions a:hover, .share-actions a:focus { color: var(--accent); }
 
 .pagination { display: flex; align-items: center; justify-content: center; gap: 16px; margin: 42px 0 10px; }
 .pagination a, .pagination span { min-width: 150px; padding: 11px 13px; border: 1px solid var(--line); border-radius: 9px; color: var(--ink); background: var(--card); text-align: center; text-decoration: none; }

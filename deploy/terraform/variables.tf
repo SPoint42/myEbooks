@@ -46,7 +46,7 @@ variable "image" {
 }
 
 variable "google_drive_public_url" {
-  description = "URL HTTPS du dossier Google Drive public contenant les EPUB"
+  description = "URL HTTPS du dossier Google Drive public contenant les ebooks"
   type        = string
   sensitive   = true
 

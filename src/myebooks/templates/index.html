@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="Votre bibliothèque EPUB indexée depuis Google Drive.">
+    <meta name="description" content="Votre bibliothèque d’ebooks indexée depuis Google Drive.">
     <title>myEbooks — Ma bibliothèque</title>
     <link rel="stylesheet" href="{{ url_for('static', path='/app.css') }}">
   </head>
@@ -73,6 +73,14 @@
             <a class="download-button" href="{{ url_for('download_book', book_id=book.id) }}" target="_self">
               Télécharger sur Kobo
             </a>
+            {% set book_share_links = share_links.get(book.id) %}
+            {% if book_share_links %}
+              <div class="share-actions" role="group" aria-label="Partager {{ book.title }}">
+                <span>Partager :</span>
+                <a href="{{ book_share_links.whatsapp }}" target="_blank" rel="noopener noreferrer">WhatsApp</a>
+                <a href="{{ book_share_links.imessage }}">iMessage</a>
+              </div>
+            {% endif %}
           </div>
         </article>
         {% endfor %}
@@ -106,6 +114,6 @@
       {% endif %}
     </main>
 
-    <footer>myEbooks · interface sans JavaScript · EPUB sans DRM</footer>
+    <footer>myEbooks · interface sans JavaScript · ebooks sans DRM</footer>
   </body>
 </html>

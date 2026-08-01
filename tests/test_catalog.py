@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 import tarfile
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -71,6 +72,27 @@ def test_catalog_archive_can_be_verified_and_installed(settings, tmp_path):
     assert len(LibraryDatabase(installed / "myebooks.sqlite3", read_only=True).list_books()) == 1
     assert (installed / "manifest.json").is_file()
     assert len(list((installed / "covers").iterdir())) == 1
+
+
+def test_catalog_artifact_contains_all_selected_formats(settings, tmp_path):
+    selected_settings = replace(
+        settings,
+        index_extensions=frozenset({"epub", "pdf"}),
+    )
+
+    artifact = build_catalog_artifact(
+        selected_settings,
+        FakeDriveSource(),
+        output_dir=tmp_path / "dist",
+        staged_catalog=tmp_path / "deploy" / "catalog",
+    )
+
+    books = LibraryDatabase(
+        artifact.staged_catalog / "myebooks.sqlite3", read_only=True
+    ).list_books()
+    assert artifact.book_count == 2
+    assert artifact.cover_count == 2
+    assert {book.file_format for book in books} == {"epub", "pdf"}
 
 
 def test_empty_catalog_archive_installs_an_empty_covers_directory(settings, tmp_path):
@@ -206,9 +228,25 @@ def test_catalog_scripts_are_executable_and_document_their_actions():
     assert result.returncode == 0
     assert "génère l'artefact SQLite" in result.stdout
     assert "--drive-url" in result.stdout
+    assert "--extensions" in result.stdout
     assert "--publish" in result.stdout
     assert "--skip-index" in result.stdout
     assert "--force-publish" in result.stdout
+
+    invalid_extensions = subprocess.run(
+        [
+            str(PROJECT_DIR / "scripts" / "build_catalog"),
+            "--fake",
+            "--extensions",
+            "epub,mobi",
+        ],
+        cwd=PROJECT_DIR,
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    assert invalid_extensions.returncode == 2
+    assert "Extension(s) non prise(s) en charge" in invalid_extensions.stderr
 
     incompatible = subprocess.run(
         [
@@ -243,3 +281,30 @@ def test_catalog_scripts_are_executable_and_document_their_actions():
     )
     assert image_help.returncode == 0
     assert "linux/amd64" in image_help.stdout
+
+
+def test_index_script_accepts_a_comma_separated_extension_list(tmp_path):
+    data_dir = tmp_path / "data"
+
+    result = subprocess.run(
+        [
+            str(PROJECT_DIR / "scripts" / "index_catalog"),
+            "--fake",
+            "--extensions",
+            "epub,pdf",
+            "--data",
+            str(data_dir),
+        ],
+        cwd=PROJECT_DIR,
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+
+    assert result.returncode == 0
+    assert "sur 2 livre(s)" in result.stdout
+    books = LibraryDatabase(data_dir / "myebooks.sqlite3").list_books()
+    assert {book.file_format for book in books} == {
+        "epub",
+        "pdf",
+    }

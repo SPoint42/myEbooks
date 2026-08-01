@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 
 from myebooks.database import LibraryDatabase
 from myebooks.demo import FakeDriveSource
@@ -56,6 +57,35 @@ def test_force_reindexes_unchanged_files(settings):
 
     assert result.indexed == 1
     assert result.unchanged == 0
+
+
+def test_index_can_select_epub_and_pdf_formats(settings):
+    selected_settings = replace(
+        settings,
+        index_extensions=frozenset({"epub", "pdf"}),
+    )
+    indexer, database, _source = make_indexer(selected_settings)
+
+    result = indexer.run()
+
+    assert result.discovered == 2
+    assert result.indexed == 2
+    assert {book.file_format for book in database.list_books()} == {"epub", "pdf"}
+
+
+def test_changing_selected_formats_marks_other_formats_unavailable(settings):
+    selected_settings = replace(
+        settings,
+        index_extensions=frozenset({"epub", "pdf"}),
+    )
+    indexer, database, source = make_indexer(selected_settings)
+    indexer.run()
+
+    epub_only = LibraryIndexer(settings, database, source).run()
+
+    assert epub_only.discovered == 1
+    assert epub_only.removed == 1
+    assert [book.file_format for book in database.list_books()] == ["epub"]
 
 
 def test_index_reports_progress_in_logs(settings, caplog):

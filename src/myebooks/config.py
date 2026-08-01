@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse
 
+from .domain import SUPPORTED_EBOOK_EXTENSIONS
+
 GOOGLE_DRIVE_FOLDER_PATH = re.compile(r"^/drive/folders/[A-Za-z0-9_-]{20,}/?$")
 
 
@@ -29,6 +31,21 @@ def _boolean(name: str, default: bool = False) -> bool:
     raise ValueError(f"{name} doit être un booléen")
 
 
+def parse_index_extensions(raw: str) -> frozenset[str]:
+    parts = raw.split(",")
+    extensions = frozenset(part.strip().lower().removeprefix(".") for part in parts)
+    if not extensions or "" in extensions:
+        raise ValueError("La liste d'extensions ne doit pas être vide")
+    unsupported = extensions - SUPPORTED_EBOOK_EXTENSIONS
+    if unsupported:
+        raise ValueError(
+            "Extension(s) non prise(s) en charge : "
+            + ", ".join(sorted(unsupported))
+            + ". Valeurs autorisées : epub, pdf."
+        )
+    return extensions
+
+
 @dataclass(frozen=True, slots=True)
 class Settings:
     data_dir: Path
@@ -40,6 +57,7 @@ class Settings:
     local_library_dir: Path | None = None
     background_index: bool = False
     force_index_on_start: bool = False
+    index_extensions: frozenset[str] = frozenset({"epub"})
     max_file_size: int = 150 * 1024 * 1024
     max_epub_expanded_size: int = 300 * 1024 * 1024
     max_epub_entries: int = 10_000
@@ -76,6 +94,9 @@ class Settings:
             ),
             background_index=_boolean("EBOOK_BACKGROUND_INDEX"),
             force_index_on_start=_boolean("EBOOK_FORCE_INDEX_ON_START"),
+            index_extensions=parse_index_extensions(
+                os.getenv("EBOOK_INDEX_EXTENSIONS", "epub")
+            ),
             max_file_size=_positive_int("EBOOK_MAX_FILE_SIZE", 150 * 1024 * 1024),
             max_epub_expanded_size=_positive_int(
                 "EBOOK_MAX_EPUB_EXPANDED_SIZE", 300 * 1024 * 1024
@@ -86,6 +107,11 @@ class Settings:
         return settings
 
     def validate(self) -> None:
+        if (
+            not self.index_extensions
+            or set(self.index_extensions) - SUPPORTED_EBOOK_EXTENSIONS
+        ):
+            raise ValueError("index_extensions doit contenir uniquement epub et/ou pdf")
         if self.source == "local":
             if not self.local_library_dir:
                 raise ValueError("EBOOK_LOCAL_DIR est requis avec EBOOK_SOURCE=local")
