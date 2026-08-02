@@ -288,7 +288,7 @@ MYEBOOKS_GITHUB_REPOSITORY=organisation/depot \
 
 Ce script sans argument réalise tout le cycle de production dans cet ordre :
 
-1. indexation incrémentale des EPUB du Drive public ;
+1. indexation incrémentale des EPUB et PDF du Drive public ;
 2. push du commit courant de `main` vers GitHub avec la clé SSH ;
 3. publication de SQLite et des couvertures dans une nouvelle GitHub Release ;
 4. déclenchement du déploiement Scaleway et attente du résultat de GitHub Actions.

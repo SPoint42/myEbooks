@@ -98,7 +98,7 @@ def test_full_deploy_script_is_fixed_safe_and_uses_the_public_drive():
         "https://drive.google.com/drive/folders/"
         "1WeqHFZQ0zl0Oy5u6JiabChlIGx3D5sie?usp=sharing"
     ) in script
-    assert 'INDEX_EXTENSIONS="epub"' in script
+    assert 'INDEX_EXTENSIONS="epub,pdf"' in script
     assert '"${SCRIPT_DIR}/index_catalog"' in script
     assert 'git push origin "$EXPECTED_BRANCH"' in script
     assert '"${SCRIPT_DIR}/publish_catalog" --skip-index' in script
