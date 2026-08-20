@@ -88,6 +88,24 @@ def test_changing_selected_formats_marks_other_formats_unavailable(settings):
     assert [book.file_format for book in database.list_books()] == ["epub"]
 
 
+def test_targeted_index_preserves_unselected_formats(settings):
+    all_formats = replace(
+        settings,
+        index_extensions=frozenset({"epub", "pdf"}),
+    )
+    indexer, database, source = make_indexer(all_formats)
+    indexer.run()
+    source._files.pop("demo-epub")
+
+    epub_only = LibraryIndexer(settings, database, source).run(
+        preserve_unselected_formats=True
+    )
+
+    assert epub_only.discovered == 0
+    assert epub_only.removed == 1
+    assert [book.file_format for book in database.list_books()] == ["pdf"]
+
+
 def test_index_reports_progress_in_logs(settings, caplog):
     indexer, _database, _source = make_indexer(settings)
     caplog.set_level(logging.INFO, logger="uvicorn.error.myebooks.indexer")

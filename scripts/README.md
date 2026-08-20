@@ -13,7 +13,7 @@ Pour afficher les options réellement disponibles sans exécuter une opération 
 ./scripts/NOM_DU_SCRIPT --help
 ```
 
-La seule exception est `index_publish_deploy`, volontairement figé et sans aucun argument.
+`index_publish_deploy` est volontairement figé à un unique argument de format (`epub` ou `pdf`).
 
 ## Prérequis communs
 
@@ -127,6 +127,10 @@ L’indexation est incrémentale. Les livres inchangés ne sont pas reparsés. P
   --drive-url 'https://drive.google.com/drive/folders/IDENTIFIANT_DU_DOSSIER' \
   --force
 ```
+
+Par défaut, les formats exclus par `--extensions` sont marqués comme indisponibles. Pour mettre à
+jour un seul format tout en conservant les autres dans le catalogue existant, ajouter
+`--preserve-unselected`. Cette option est notamment utilisée par `index_publish_deploy`.
 
 ## `build_catalog` : préparer localement un artefact de déploiement
 
@@ -284,13 +288,16 @@ MYEBOOKS_GITHUB_REPOSITORY=organisation/depot \
   ./scripts/deploy_scaleway --tag catalog-20260801T194011Z --watch
 ```
 
-## `index_publish_deploy` : tout indexer, publier et déployer
+## `index_publish_deploy` : indexer un format, tout publier et déployer
 
-Ce script sans argument réalise tout le cycle de production dans cet ordre :
+Ce script prend un unique argument, `epub` ou `pdf`, et réalise tout le cycle de production dans
+cet ordre :
 
-1. indexation incrémentale des EPUB et PDF du Drive public ;
+1. indexation incrémentale du format demandé dans le Drive public, sans retirer l'autre format du
+   catalogue local ;
 2. push du commit courant de `main` vers GitHub avec la clé SSH ;
-3. publication de SQLite et des couvertures dans une nouvelle GitHub Release ;
+3. publication de tout SQLite et de toutes les couvertures référencées, EPUB et PDF, dans une
+   nouvelle GitHub Release ;
 4. déclenchement du déploiement Scaleway et attente du résultat de GitHub Actions.
 
 Le Drive est fixé directement dans le script :
@@ -299,13 +306,14 @@ Le Drive est fixé directement dans le script :
 https://drive.google.com/drive/folders/1WeqHFZQ0zl0Oy5u6JiabChlIGx3D5sie?usp=sharing
 ```
 
-Il se lance simplement depuis la racine du dépôt :
+Il se lance depuis la racine du dépôt en indiquant le seul format à réindexer :
 
 ```bash
-./scripts/index_publish_deploy
+./scripts/index_publish_deploy epub
+./scripts/index_publish_deploy pdf
 ```
 
-Le script ne prend aucune option, pas même `--help`. Avant son lancement :
+Le script accepte aussi `--help`. Avant son lancement :
 
 - arrêter `./start_dev` afin qu’aucune autre indexation ne soit active ;
 - commiter tous les changements ;
@@ -355,5 +363,5 @@ Publier puis déployer sont deux opérations séparées :
 Effectuer tout le cycle de production avec le Drive configuré pour ce projet :
 
 ```bash
-./scripts/index_publish_deploy
+./scripts/index_publish_deploy epub
 ```

@@ -53,12 +53,21 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def index_library(settings: Settings, source: EbookSource, *, force: bool = False) -> IndexResult:
+def index_library(
+    settings: Settings,
+    source: EbookSource,
+    *,
+    force: bool = False,
+    preserve_unselected_formats: bool = False,
+) -> IndexResult:
     settings.data_dir.mkdir(parents=True, exist_ok=True)
     settings.covers_dir.mkdir(parents=True, exist_ok=True)
     database = LibraryDatabase(settings.database_path)
     database.initialize()
-    result = LibraryIndexer(settings, database, source).run(force=force)
+    result = LibraryIndexer(settings, database, source).run(
+        force=force,
+        preserve_unselected_formats=preserve_unselected_formats,
+    )
     database.prepare_for_read_only()
     return result
 

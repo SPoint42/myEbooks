@@ -2,16 +2,36 @@
 
 set -Eeuo pipefail
 
-if [[ $# -ne 0 ]]; then
-    echo "Erreur : index_publish_deploy ne prend aucun argument." >&2
+usage() {
+    echo "Usage : ./scripts/index_publish_deploy <epub|pdf>"
+}
+
+if [[ $# -eq 1 && "$1" == "--help" ]]; then
+    usage
+    exit 0
+fi
+
+if [[ $# -ne 1 ]]; then
+    echo "Erreur : indiquez exactement un format à indexer : epub ou pdf." >&2
+    usage >&2
     exit 2
 fi
+
+case "$1" in
+    epub|pdf)
+        INDEX_EXTENSION="$1"
+        ;;
+    *)
+        echo "Erreur : format invalide ; valeurs autorisées : epub, pdf." >&2
+        usage >&2
+        exit 2
+        ;;
+esac
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 DRIVE_URL="https://drive.google.com/drive/folders/1WeqHFZQ0zl0Oy5u6JiabChlIGx3D5sie?usp=sharing"
 DATA_DIR="${PROJECT_DIR}/data"
-INDEX_EXTENSIONS="epub,pdf"
 EXPECTED_BRANCH="main"
 EXPECTED_ORIGIN="git@github.com:SPoint42/myEbooks.git"
 GITHUB_REPOSITORY="SPoint42/myEbooks"
@@ -87,11 +107,12 @@ if [[ -f "${DATA_DIR}/myebooks.sqlite3" ]]; then
     fi
 fi
 
-echo "Étape 1/4 : indexation incrémentale du Drive public…"
+echo "Étape 1/4 : indexation incrémentale du format $INDEX_EXTENSION dans le Drive public…"
 "${SCRIPT_DIR}/index_catalog" \
     --drive-url "$DRIVE_URL" \
     --data "$DATA_DIR" \
-    --extensions "$INDEX_EXTENSIONS"
+    --extensions "$INDEX_EXTENSION" \
+    --preserve-unselected
 
 require_clean_worktree
 

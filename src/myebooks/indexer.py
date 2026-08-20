@@ -99,7 +99,12 @@ class LibraryIndexer:
         path.write_bytes(book.cover)
         return path.name
 
-    def run(self, *, force: bool = False) -> IndexResult:
+    def run(
+        self,
+        *,
+        force: bool = False,
+        preserve_unselected_formats: bool = False,
+    ) -> IndexResult:
         if not self._lock.acquire(blocking=False):
             raise IndexAlreadyRunning("Une indexation est déjà en cours")
 
@@ -180,7 +185,12 @@ class LibraryIndexer:
                 report_progress()
 
             stop_if_requested()
-            removed, missing_covers = self.database.mark_missing(present_ids)
+            removed, missing_covers = self.database.mark_missing(
+                present_ids,
+                file_formats=(
+                    self.settings.index_extensions if preserve_unselected_formats else None
+                ),
+            )
             for filename in missing_covers:
                 self._remove_cover(filename)
             result = IndexResult(

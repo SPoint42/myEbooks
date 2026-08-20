@@ -91,6 +91,11 @@ def _parser() -> argparse.ArgumentParser:
 
     index_parser = commands.add_parser("index", help="Met à jour la base SQLite locale")
     _add_source_arguments(index_parser)
+    index_parser.add_argument(
+        "--preserve-unselected",
+        action="store_true",
+        help="Conserve dans le catalogue les formats exclus par --extensions",
+    )
 
     build_parser = commands.add_parser(
         "build",
@@ -170,7 +175,12 @@ def main(argv: list[str] | None = None) -> int:
     if arguments.command == "index":
         settings = _settings_from_arguments(arguments)
         source = create_source(settings)
-        result = index_library(settings, source, force=arguments.force)
+        result = index_library(
+            settings,
+            source,
+            force=arguments.force,
+            preserve_unselected_formats=arguments.preserve_unselected,
+        )
         print(
             f"Indexation terminée : {result.indexed} indexé(s), "
             f"{result.unchanged} inchangé(s), {result.failed} en erreur, "

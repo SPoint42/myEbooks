@@ -203,13 +203,26 @@ class LibraryDatabase:
                 ),
             )
 
-    def mark_missing(self, present_source_ids: set[str]) -> tuple[int, list[str]]:
+    def mark_missing(
+        self,
+        present_source_ids: set[str],
+        *,
+        file_formats: frozenset[str] | None = None,
+    ) -> tuple[int, list[str]]:
         self._require_writable()
+        if file_formats is not None and set(file_formats) - set(EBOOK_MIME_TYPES):
+            raise ValueError("Format de fichier non pris en charge")
         with closing(self.connect()) as connection, connection:
             rows = connection.execute(
-                "SELECT source_id, cover_filename FROM books WHERE available = 1"
+                "SELECT source_id, cover_filename, file_format "
+                "FROM books WHERE available = 1"
             ).fetchall()
-            missing = [row for row in rows if row["source_id"] not in present_source_ids]
+            missing = [
+                row
+                for row in rows
+                if row["source_id"] not in present_source_ids
+                and (file_formats is None or row["file_format"] in file_formats)
+            ]
             connection.executemany(
                 "UPDATE books SET available = 0 WHERE source_id = ?",
                 [(row["source_id"],) for row in missing],

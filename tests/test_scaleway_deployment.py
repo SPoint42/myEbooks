@@ -80,25 +80,46 @@ def test_deploy_script_is_executable_and_rejects_invalid_catalog_tag():
     assert "catalog-YYYYMMDDTHHMMSSZ" in invalid_result.stderr
 
 
-def test_full_deploy_script_is_fixed_safe_and_uses_the_public_drive():
+def test_full_deploy_script_indexes_one_format_and_publishes_the_whole_catalog():
     assert os.access(FULL_DEPLOY_SCRIPT, os.X_OK)
 
-    unexpected_argument = subprocess.run(
+    help_result = subprocess.run(
         [str(FULL_DEPLOY_SCRIPT), "--help"],
         cwd=PROJECT_DIR,
         capture_output=True,
         check=False,
         text=True,
     )
-    assert unexpected_argument.returncode == 2
-    assert "ne prend aucun argument" in unexpected_argument.stderr
+    assert help_result.returncode == 0
+    assert "<epub|pdf>" in help_result.stdout
+
+    missing_argument = subprocess.run(
+        [str(FULL_DEPLOY_SCRIPT)],
+        cwd=PROJECT_DIR,
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    assert missing_argument.returncode == 2
+    assert "exactement un format" in missing_argument.stderr
+
+    invalid_format = subprocess.run(
+        [str(FULL_DEPLOY_SCRIPT), "epub,pdf"],
+        cwd=PROJECT_DIR,
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    assert invalid_format.returncode == 2
+    assert "format invalide" in invalid_format.stderr
 
     script = FULL_DEPLOY_SCRIPT.read_text()
     assert (
         "https://drive.google.com/drive/folders/"
         "1WeqHFZQ0zl0Oy5u6JiabChlIGx3D5sie?usp=sharing"
     ) in script
-    assert 'INDEX_EXTENSIONS="epub,pdf"' in script
+    assert '--extensions "$INDEX_EXTENSION"' in script
+    assert "--preserve-unselected" in script
     assert '"${SCRIPT_DIR}/index_catalog"' in script
     assert 'git push origin "$EXPECTED_BRANCH"' in script
     assert '"${SCRIPT_DIR}/publish_catalog" --skip-index' in script
