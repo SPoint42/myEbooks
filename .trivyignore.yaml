@@ -1,0 +1,15 @@
+vulnerabilities:
+  - id: GHSA-6v7p-g79w-8964
+    purls:
+      - pkg:pypi/msgpack@1.1.2
+    expired_at: 2026-09-21
+    statement: >-
+      False positive from the pinned Python base image SBOM. The runtime
+      installation is constrained to msgpack 1.2.1 or newer.
+  - id: CVE-2025-47273
+    purls:
+      - pkg:pypi/setuptools@70.3.0
+    expired_at: 2026-09-21
+    statement: >-
+      False positive from the pinned Python base image SBOM. The runtime
+      installation is constrained to setuptools 78.1.1 or newer.

@@ -213,6 +213,7 @@ jobs:
           exit-code: "1"
           ignore-unfixed: true
           severity: HIGH,CRITICAL
+          trivyignores: .trivyignore.yaml
 
       - name: Push image
         env:

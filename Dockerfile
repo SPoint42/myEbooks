@@ -6,6 +6,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+RUN apt-get update \
+    && apt-get upgrade --yes \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN groupadd --system myebooks && useradd --system --gid myebooks --home-dir /app myebooks
 
 COPY pyproject.toml constraints.txt README.md LICENSE ./
