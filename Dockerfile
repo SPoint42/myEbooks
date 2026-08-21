@@ -1,4 +1,4 @@
-FROM python:3.13-slim AS runtime
+FROM python:3.13.15-slim-trixie@sha256:ffb752e139c0a19692a43af8d8523b274222dd68eebad5d583b45c2201c6e30a AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -8,9 +8,11 @@ WORKDIR /app
 
 RUN groupadd --system myebooks && useradd --system --gid myebooks --home-dir /app myebooks
 
-COPY pyproject.toml README.md LICENSE ./
+COPY pyproject.toml constraints.txt README.md LICENSE ./
 COPY src ./src
-RUN pip install --no-cache-dir .
+RUN python -m pip install --no-cache-dir --upgrade --constraint constraints.txt setuptools msgpack \
+    && python -m pip install --no-cache-dir --constraint constraints.txt . \
+    && python -m pip check
 
 RUN mkdir -p /app/data/covers && chown -R myebooks:myebooks /app
 USER myebooks

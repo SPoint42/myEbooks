@@ -7,6 +7,8 @@ from pathlib import Path
 
 PROJECT_DIR = Path(__file__).parents[1]
 WORKFLOW = PROJECT_DIR / ".github" / "workflows" / "deploy-scaleway.yml"
+DOCKERFILE = PROJECT_DIR / "Dockerfile"
+CONSTRAINTS = PROJECT_DIR / "constraints.txt"
 TERRAFORM_DIR = PROJECT_DIR / "deploy" / "terraform"
 DEPLOY_SCRIPT = PROJECT_DIR / "scripts" / "deploy_scaleway"
 FULL_DEPLOY_SCRIPT = PROJECT_DIR / "scripts" / "index_publish_deploy"
@@ -24,11 +26,27 @@ def test_deployment_workflow_is_manual_pinned_and_catalog_driven():
     assert "--target scaleway" in workflow
     assert "terraform -chdir=\"$TERRAFORM_DIR\" apply" in workflow
     assert "EBOOK_BACKGROUND_INDEX" not in workflow
+    assert "version: v0.74.0" in workflow
 
     action_references = re.findall(r"uses:\s+([^\s#]+)", workflow)
     assert action_references
     for reference in action_references:
         assert re.fullmatch(r"[^@\s]+@[0-9a-f]{40}", reference), reference
+
+
+def test_deployment_image_pins_base_and_security_dependency_floors():
+    dockerfile = DOCKERFILE.read_text()
+    constraints = CONSTRAINTS.read_text()
+
+    assert (
+        "FROM python:3.13.15-slim-trixie@"
+        "sha256:ffb752e139c0a19692a43af8d8523b274222dd68eebad5d583b45c2201c6e30a"
+    ) in dockerfile
+    assert "--constraint constraints.txt" in dockerfile
+    assert "setuptools msgpack" in dockerfile
+    assert "python -m pip check" in dockerfile
+    assert "msgpack>=1.2.1" in constraints
+    assert "setuptools>=78.1.1" in constraints
 
 
 def test_terraform_uses_read_only_scale_to_zero_runtime_and_current_fields():

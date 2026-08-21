@@ -1,0 +1,5 @@
+# Security floors for packages present in the production image.
+# GHSA-6v7p-g79w-8964
+msgpack>=1.2.1
+# CVE-2025-47273
+setuptools>=78.1.1
