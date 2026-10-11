@@ -41,17 +41,18 @@ def test_deployment_image_pins_base_updates_os_and_sets_security_dependency_floo
     constraints = CONSTRAINTS.read_text()
 
     assert (
-        "FROM python:3.13.15-slim-trixie@"
-        "sha256:ffb752e139c0a19692a43af8d8523b274222dd68eebad5d583b45c2201c6e30a"
+        "FROM python:3.13.16-slim-trixie@"
+        "sha256:70729b46c69b4f1e97c4822c1af3df53a1476cf5ddc6c087c0c10bc3a5678c2f"
     ) in dockerfile
     assert "apt-get update" in dockerfile
     assert "apt-get upgrade --yes" in dockerfile
     assert "rm -rf /var/lib/apt/lists/*" in dockerfile
     assert "--constraint constraints.txt" in dockerfile
-    assert "setuptools msgpack" in dockerfile
+    assert "setuptools msgpack urllib3" in dockerfile
     assert "python -m pip check" in dockerfile
     assert "msgpack>=1.2.1" in constraints
     assert "setuptools>=78.1.1" in constraints
+    assert "urllib3>=2.8.0" in constraints
 
 
 def test_trivy_ignores_only_stale_base_sbom_packages_temporarily():
@@ -61,8 +62,11 @@ def test_trivy_ignores_only_stale_base_sbom_packages_temporarily():
     assert "pkg:pypi/msgpack@1.1.2" in trivy_ignore
     assert "CVE-2025-47273" in trivy_ignore
     assert "pkg:pypi/setuptools@70.3.0" in trivy_ignore
-    assert trivy_ignore.count("expired_at: 2026-09-21") == 2
-    assert trivy_ignore.count("False positive from the pinned Python base image SBOM") == 2
+    assert "CVE-2026-97687" in trivy_ignore
+    assert "CVE-2026-97689" in trivy_ignore
+    assert trivy_ignore.count("pkg:pypi/urllib3@2.7.0") == 2
+    assert trivy_ignore.count("expired_at: 2026-11-11") == 4
+    assert trivy_ignore.count("False positive from the pinned Python base image SBOM") == 4
 
 
 def test_terraform_uses_read_only_scale_to_zero_runtime_and_current_fields():

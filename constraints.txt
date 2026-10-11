@@ -3,3 +3,5 @@
 msgpack>=1.2.1
 # CVE-2025-47273
 setuptools>=78.1.1
+# CVE-2026-97687, CVE-2026-97689
+urllib3>=2.8.0

@@ -1,4 +1,4 @@
-FROM python:3.13.15-slim-trixie@sha256:ffb752e139c0a19692a43af8d8523b274222dd68eebad5d583b45c2201c6e30a AS runtime
+FROM python:3.13.16-slim-trixie@sha256:70729b46c69b4f1e97c4822c1af3df53a1476cf5ddc6c087c0c10bc3a5678c2f AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -14,7 +14,7 @@ RUN groupadd --system myebooks && useradd --system --gid myebooks --home-dir /ap
 
 COPY pyproject.toml constraints.txt README.md LICENSE ./
 COPY src ./src
-RUN python -m pip install --no-cache-dir --upgrade --constraint constraints.txt setuptools msgpack \
+RUN python -m pip install --no-cache-dir --upgrade --constraint constraints.txt setuptools msgpack urllib3 \
     && python -m pip install --no-cache-dir --constraint constraints.txt . \
     && python -m pip check
 
